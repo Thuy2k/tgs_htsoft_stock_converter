@@ -521,6 +521,11 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
+        // Strip UTF-8 BOM if present (EF BB BF)
+        if (substr($json, 0, 3) === "\xEF\xBB\xBF") {
+            $json = substr($json, 3);
+        }
+
         $decoded = json_decode($json, true);
         if (!is_array($decoded)) {
             self::error('Nội dung JSON không hợp lệ.');
