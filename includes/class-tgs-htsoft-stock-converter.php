@@ -68,13 +68,8 @@ class TGS_HTSoft_Stock_Converter
             filemtime(TGS_HTSOFT_CONVERTER_DIR . 'assets/css/htsoft-converter.css')
         );
 
-        wp_enqueue_script(
-            'tgs-zxing-lib',
-            'https://unpkg.com/@zxing/library@0.21.3',
-            [],
-            '0.21.3',
-            true
-        );
+        // ZXing + tgs-barcode-scanner được load trực tiếp trong view PHP (như hsd-checker)
+        // để đảm bảo đúng thứ tự và TGSBarcodeScanner luôn sẵn sàng trước htsoft-converter.js
 
         wp_enqueue_script(
             'tgs-xlsx-lib',
@@ -83,16 +78,6 @@ class TGS_HTSoft_Stock_Converter
             '0.18.5',
             true
         );
-
-        if (defined('TGS_SHOP_PLUGIN_URL')) {
-            wp_enqueue_script(
-                'tgs-barcode-scanner',
-                TGS_SHOP_PLUGIN_URL . 'assets/js/common/tgs-barcode-scanner.js',
-                ['tgs-zxing-lib'],
-                null,
-                true
-            );
-        }
 
         wp_enqueue_script(
             'tgs-htsoft-converter-js',

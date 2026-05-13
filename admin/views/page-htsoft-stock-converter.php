@@ -5,7 +5,14 @@ if (!defined('ABSPATH')) {
 }
 
 $products_url = admin_url('admin.php?page=tgs-shop-management&view=products-v2');
+$scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets/js/common/tgs-barcode-scanner.js' : '';
 ?>
+
+<!-- ZXing + Scanner (load trực tiếp như hsd-checker để đảm bảo thứ tự) -->
+<script src="https://unpkg.com/@zxing/library@0.21.3"></script>
+<?php if ($scanner_js_url) : ?>
+<script src="<?php echo esc_url($scanner_js_url); ?>"></script>
+<?php endif; ?>
 
 <div class="tgs-htsoft-converter-page">
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">

@@ -386,7 +386,7 @@
     }
 
     function startScanner() {
-        if (typeof window.TGSBarcodeScanner === 'undefined') {
+        if (typeof TGSBarcodeScanner === 'undefined') {
             toast('Chưa tải được scanner. Vui lòng thử lại.', 'warning');
             return;
         }
@@ -394,7 +394,7 @@
         stopScanner();
         dom.scannerWrap.classList.remove('d-none');
 
-        state.scanner = new window.TGSBarcodeScanner({
+        state.scanner = new TGSBarcodeScanner({
             containerId: 'scanCameraPreview',
             onSuccess: (result) => {
                 const now = Date.now();
