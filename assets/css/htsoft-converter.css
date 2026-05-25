@@ -167,3 +167,42 @@
         overflow-x: auto;
     }
 }
+
+
+/* ── v2: Multi-DVT additions ───────────────────────────────────── */
+.tgs-tab-disabled {
+    opacity: 0.55;
+    pointer-events: none !important;
+    cursor: not-allowed;
+}
+
+.tgs-selected-product-info {
+    background: var(--bs-light, #f8f9fa);
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+.tgs-config-table {
+    font-size: 0.875rem;
+}
+
+.tgs-config-table td {
+    vertical-align: middle;
+}
+
+.btn-xs {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+#cfgSearchResults .tgs-product-result {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    padding: 0.45rem 0.75rem;
+}
+
+#cfgSearchResults .tgs-product-result:first-child {
+    border-top: none;
+}
