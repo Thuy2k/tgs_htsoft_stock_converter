@@ -197,7 +197,19 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                         </div>
                                     </div>
 
-                                    <div class="d-flex gap-2 flex-wrap mt-2">
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label">
+                                                Giá bán <span class="text-muted small">(tuỳ chọn)</span>
+                                            </label>
+                                            <div class="input-group">
+                                                <input type="number" class="form-control" id="cfgUnitPrice"
+                                                       min="0" step="1" placeholder="VD: 45000">
+                                                <span class="input-group-text">VNĐ</span>
+                                            </div>
+                                            <div class="form-text">Giá bán theo DVT này. Để trống nếu chưa xác định.</div>
+                                        </div>
+                                    </div>
                                         <button type="button" class="btn btn-primary" id="btnSaveMapping">
                                             <i class="bx bx-save me-1"></i>Lưu cấu hình
                                         </button>
@@ -235,16 +247,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                 <button class="btn btn-sm btn-primary" type="button" id="btnExportExcel">
                                     <i class="bx bx-export me-1"></i>Xuất Excel
                                 </button>
-                                <!-- JSON (phụ, backward compat) -->
-                                <button class="btn btn-sm btn-outline-primary" type="button"
-                                        id="btnExportMappingsJson">
-                                    <i class="bx bx-export me-1"></i>Xuất JSON
-                                </button>
-                                <button class="btn btn-sm btn-outline-success" type="button"
-                                        id="btnImportMappingsJson">
-                                    <i class="bx bx-import me-1"></i>Import JSON
-                                </button>
-                                <input type="file" id="mappingJsonFile" accept=".json,application/json" class="d-none">
+                                <!-- JSON (đã xóa) -->
                                 <!-- Import giá bán -->
                                 <button class="btn btn-sm btn-warning" type="button" id="btnImportPriceExcel">
                                     <i class="bx bx-dollar me-1"></i>Import Giá

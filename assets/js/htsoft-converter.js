@@ -18,8 +18,9 @@
         mappingSearchTimer: null,
         selectedProduct:    null,
         mappingPage:        1,
-        mappingPerPage:     50,
+        mappingPerPage:     100,
         mappingTotal:       0,
+        mappingShowAll:     false,
     };
 
     /* =========================================================================
@@ -48,6 +49,7 @@
         cfgConvertUnit:        el('cfgConvertUnit'),
         cfgConvertToHtsoft:    el('cfgConvertToHtsoft'),
         cfgNote:               el('cfgNote'),
+        cfgUnitPrice:          el('cfgUnitPrice'),
         cfgRatioPreview:       el('cfgRatioPreview'),
         cfgEditTitle:          el('cfgEditTitle'),
         cfgFormMode:           el('cfgFormMode'),
@@ -67,10 +69,6 @@
 
         btnImportPriceExcel:   el('btnImportPriceExcel'),
         priceImportFile:       el('priceImportFile'),
-
-        btnExportMappingsJson: el('btnExportMappingsJson'),
-        btnImportMappingsJson: el('btnImportMappingsJson'),
-        mappingJsonFile:       el('mappingJsonFile'),
     };
 
     /* =========================================================================
@@ -210,12 +208,16 @@
         }
 
         var html = '<table class="table table-sm tgs-config-table mb-0"><thead><tr>' +
-            '<th>Don vi tinh</th><th>Ty le</th><th>Ghi chu</th><th></th>' +
+            '<th>Don vi tinh</th><th>Ty le</th><th>Gia ban</th><th>Ghi chu</th><th></th>' +
             '</tr></thead><tbody>';
         configs.forEach(function (c) {
+            var priceCell = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '')
+                ? '<span class="text-success">' + formatPrice(parseFloat(c.unit_price)) + '</span>'
+                : '<em class="text-muted">—</em>';
             html += '<tr>' +
                 '<td>' + (c.convert_unit ? escHtml(c.convert_unit) : '<em class="text-muted">mac dinh</em>') + '</td>' +
                 '<td>' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
+                '<td>' + priceCell + '</td>' +
                 '<td class="text-muted small">' + escHtml(c.convert_note || '') + '</td>' +
                 '<td class="text-end text-nowrap">' +
                 '<button class="btn btn-xs btn-outline-primary me-1" data-cfg-edit="' + c.global_htsoft_stock_convert_id + '">' +
@@ -253,6 +255,7 @@
         if (dom.cfgConvertUnit)     dom.cfgConvertUnit.value      = c.convert_unit || '';
         if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = c.convert_to_htsoft;
         if (dom.cfgNote)            dom.cfgNote.value             = c.convert_note || '';
+        if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '') ? c.unit_price : '';
         if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Chỉnh sửa';
         if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-edit-alt me-1 text-warning"></i>Chỉnh sửa DVT: ' + escHtml(c.convert_unit || 'mặc định');
         updateRatioPreview();
@@ -267,6 +270,7 @@
         if (dom.cfgConvertUnit)     dom.cfgConvertUnit.value      = '';
         if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = '';
         if (dom.cfgNote)            dom.cfgNote.value             = '';
+        if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = '';
         if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Thêm mới';
         if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-plus-circle me-1 text-primary"></i>Thêm cấu hình DVT mới';
         updateRatioPreview();
@@ -302,6 +306,7 @@
         var unit     = (dom.cfgConvertUnit     ? dom.cfgConvertUnit.value     : '').trim();
         var toHtsoft = (dom.cfgConvertToHtsoft ? dom.cfgConvertToHtsoft.value : '').trim();
         var note     = (dom.cfgNote            ? dom.cfgNote.value            : '').trim();
+        var rawPrice = (dom.cfgUnitPrice       ? dom.cfgUnitPrice.value       : '').trim();
 
         if (!unit && id === 0) { toast('Vui long nhap ten Don Vi Tinh.', 'error'); return; }
         if (!toHtsoft || parseFloat(toHtsoft.replace(',', '.')) <= 0) {
@@ -312,11 +317,12 @@
         if (dom.btnSaveMapping) dom.btnSaveMapping.disabled = true;
 
         postAjax('tgs_htsoft_converter_save_mapping', {
-            id:                id,
+            id:                 id,
             global_product_sku: sku,
             convert_unit:       unit,
             convert_to_htsoft:  toHtsoft.replace(',', '.'),
             convert_note:       note,
+            unit_price:         rawPrice,
         }).then(function (res) {
             if (res.success) {
                 toast(res.data.message || 'Da luu.', 'success');
@@ -351,99 +357,59 @@
     /* =========================================================================
      * Mapping Table (bottom, all configs)
      * ====================================================================== */
-    function loadMappings(page) {
-        if (page !== undefined) state.mappingPage = page;
-        var kw = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim();
+    function loadMappings() {
+        var kw      = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim();
+        var sendAll = state.mappingShowAll || kw !== '';
 
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="6" class="text-center text-muted py-3">'
+                '<tr><td colspan="7" class="text-center text-muted py-3">'
                 + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</td></tr>';
         }
 
         postAjax('tgs_htsoft_converter_list_mappings', {
             keyword:  kw,
-            page:     state.mappingPage,
-            per_page: state.mappingPerPage,
+            show_all: sendAll ? 1 : 0,
         })
             .then(function (res) {
                 if (res.success) {
                     var mappings = res.data.mappings || [];
-                    var total    = res.data.total    || 0;
-                    var page     = res.data.page     || 1;
-                    var perPage  = res.data.per_page || state.mappingPerPage;
-                    state.mappingTotal   = total;
-                    state.mappingPage    = page;
-                    state.mappingPerPage = perPage;
+                    var hasMore  = !!res.data.has_more;
+                    state.mappingTotal = mappings.length;
                     renderMappingsTable(mappings);
-                    renderMappingsPagination(total, page, perPage);
+                    renderMappingsPagination(hasMore);
                     if (dom.mappingTableFooter) {
-                        var from = mappings.length ? (page - 1) * perPage + 1 : 0;
-                        var to   = (page - 1) * perPage + mappings.length;
-                        dom.mappingTableFooter.textContent =
-                            'Hiển thị ' + from + '–' + to + ' trong ' + total + ' cấu hình';
+                        dom.mappingTableFooter.textContent = mappings.length + ' cấu hình';
                     }
                 } else {
                     if (dom.mappingTableBody) {
                         dom.mappingTableBody.innerHTML =
-                            '<tr><td colspan="6" class="text-center text-danger">Lỗi tải dữ liệu.</td></tr>';
+                            '<tr><td colspan="7" class="text-center text-danger">Lỗi tải dữ liệu.</td></tr>';
                     }
                 }
             })
             .catch(function () {
                 if (dom.mappingTableBody) {
                     dom.mappingTableBody.innerHTML =
-                        '<tr><td colspan="6" class="text-center text-danger">Lỗi kết nối.</td></tr>';
+                        '<tr><td colspan="7" class="text-center text-danger">Lỗi kết nối.</td></tr>';
                 }
             });
     }
 
-    function renderMappingsPagination(total, page, perPage) {
+    function renderMappingsPagination(hasMore) {
         if (!dom.mappingPagination) return;
-        var totalPages = Math.ceil(total / perPage);
-        if (totalPages <= 1) { dom.mappingPagination.innerHTML = ''; return; }
+        dom.mappingPagination.innerHTML = '';
+        if (!hasMore) return;
 
-        var html = '<nav><ul class="pagination pagination-sm mb-0 flex-wrap">';
-
-        // Nút Đầu + Trước
-        html += '<li class="page-item' + (page <= 1 ? ' disabled' : '') + '">' +
-            '<a class="page-link" href="#" data-pg="1" title="Trang đầu">&laquo;</a></li>';
-        html += '<li class="page-item' + (page <= 1 ? ' disabled' : '') + '">' +
-            '<a class="page-link" href="#" data-pg="' + (page - 1) + '">&lsaquo;</a></li>';
-
-        // Số trang xung quanh trang hiện tại
-        var WING = 2;
-        var start = Math.max(1, page - WING);
-        var end   = Math.min(totalPages, page + WING);
-
-        if (start > 1) {
-            if (start > 2) html += '<li class="page-item disabled"><span class="page-link">…</span></li>';
-        }
-        for (var p = start; p <= end; p++) {
-            html += '<li class="page-item' + (p === page ? ' active' : '') + '">' +
-                '<a class="page-link" href="#" data-pg="' + p + '">' + p + '</a></li>';
-        }
-        if (end < totalPages) {
-            if (end < totalPages - 1) html += '<li class="page-item disabled"><span class="page-link">…</span></li>';
-        }
-
-        // Nút Sau + Cuối
-        html += '<li class="page-item' + (page >= totalPages ? ' disabled' : '') + '">' +
-            '<a class="page-link" href="#" data-pg="' + (page + 1) + '">&rsaquo;</a></li>';
-        html += '<li class="page-item' + (page >= totalPages ? ' disabled' : '') + '">' +
-            '<a class="page-link" href="#" data-pg="' + totalPages + '" title="Trang cuối">&raquo;</a></li>';
-
-        html += '</ul></nav>';
-        dom.mappingPagination.innerHTML = html;
-
-        dom.mappingPagination.querySelectorAll('[data-pg]').forEach(function (a) {
-            a.addEventListener('click', function (e) {
-                e.preventDefault();
-                var pg = parseInt(a.dataset.pg, 10);
-                if (pg < 1 || pg > totalPages || pg === state.mappingPage) return;
-                loadMappings(pg);
-            });
+        var btn = document.createElement('button');
+        btn.type      = 'button';
+        btn.className = 'btn btn-sm btn-outline-primary';
+        btn.innerHTML = '<i class="bx bx-list-ul me-1"></i>Xem tất cả';
+        btn.addEventListener('click', function () {
+            state.mappingShowAll = true;
+            loadMappings();
         });
+        dom.mappingPagination.appendChild(btn);
     }
 
     function renderMappingsTable(rows) {
@@ -968,47 +934,6 @@
     }
 
     /* =========================================================================
-     * JSON Export / Import (backward compat)
-     * ====================================================================== */
-    function exportMappingsJson() {
-        postAjax('tgs_htsoft_converter_export_mappings_json', {})
-            .then(function (res) {
-                if (!res.success) { toast('Loi xuat JSON.', 'error'); return; }
-                var blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
-                var url  = URL.createObjectURL(blob);
-                var a    = document.createElement('a');
-                a.href     = url;
-                a.download = 'htsoft-stock-mappings.json';
-                a.click();
-                URL.revokeObjectURL(url);
-                toast('Da xuat JSON.', 'success');
-            })
-            .catch(function () { toast('Loi ket noi.', 'error'); });
-    }
-
-    function importMappingsJson(file) {
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function (e) {
-            try {
-                var json = JSON.parse(e.target.result);
-                postAjax('tgs_htsoft_converter_import_mappings_json', { mappings_json: JSON.stringify(json) })
-                    .then(function (res) {
-                        if (res.success) {
-                            toast((res.data && res.data.message) || 'Import JSON xong.', 'success');
-                            loadMappings(1);
-                        } else {
-                            toast((res.data && res.data.message) || 'Loi import JSON.', 'error');
-                        }
-                    }).catch(function () { toast('Loi ket noi.', 'error'); });
-            } catch (err) {
-                toast('File JSON khong hop le: ' + err.message, 'error');
-            }
-        };
-        reader.readAsText(file);
-    }
-
-    /* =========================================================================
      * Barcode Scanner
      * ====================================================================== */
     function initScanner() {
@@ -1116,15 +1041,6 @@
             if (file) { importExcel(file); e.target.value = ''; }
         });
 
-        if (dom.btnExportMappingsJson) dom.btnExportMappingsJson.addEventListener('click', exportMappingsJson);
-        if (dom.btnImportMappingsJson) dom.btnImportMappingsJson.addEventListener('click', function () {
-            if (dom.mappingJsonFile) dom.mappingJsonFile.click();
-        });
-        if (dom.mappingJsonFile) dom.mappingJsonFile.addEventListener('change', function (e) {
-            var file = e.target.files && e.target.files[0];
-            if (file) { importMappingsJson(file); e.target.value = ''; }
-        });
-
         if (dom.btnImportPriceExcel) dom.btnImportPriceExcel.addEventListener('click', function () {
             if (dom.priceImportFile) dom.priceImportFile.click();
         });
@@ -1140,7 +1056,14 @@
     function init() {
         bindEvents();
         initScanner();
-        loadMappings();
+        // Không tự load — hiện placeholder, chờ user bấm "Xem tất cả"
+        if (dom.mappingTableBody) {
+            dom.mappingTableBody.innerHTML =
+                '<tr><td colspan="7" class="text-center text-muted py-4">'
+                + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
+                + '</td></tr>';
+        }
+        renderMappingsPagination(true);
     }
 
     if (document.readyState === 'loading') {

@@ -297,6 +297,7 @@ class TGS_HTSoft_Stock_Converter
                 convert_from_tgs,
                 convert_to_htsoft,
                 convert_note,
+                unit_price,
                 updated_at
              FROM {$mapping_table}
              WHERE BINARY global_product_sku = %s
@@ -334,6 +335,16 @@ class TGS_HTSoft_Stock_Converter
                         ? sanitize_text_field(wp_unslash($_POST['convert_note']))
                         : '';
 
+        // Giá bán (tuỳ chọn, NULL nếu để trống)
+        $raw_price  = isset($_POST['unit_price']) ? trim(wp_unslash($_POST['unit_price'])) : '';
+        $unit_price = null;
+        if ($raw_price !== '') {
+            $cleaned = (float) str_replace(',', '.', $raw_price);
+            if ($cleaned >= 0) {
+                $unit_price = $cleaned;
+            }
+        }
+
         if ($sku === '') {
             self::error('Thiếu SKU sản phẩm.');
             return;
@@ -356,12 +367,13 @@ class TGS_HTSoft_Stock_Converter
             'convert_from_tgs'   => 1,
             'convert_to_htsoft'  => $to_htsoft,
             'convert_note'       => $note,
+            'unit_price'         => $unit_price,
             'user_id'            => $user_id,
             'is_deleted'         => 0,
             'deleted_at'         => null,
             'updated_at'         => $now,
         ];
-        $formats = ['%s', '%s', '%f', '%f', '%s', '%d', '%d', '%s', '%s'];
+        $formats = ['%s', '%s', '%f', '%f', '%s', $unit_price !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
 
         // ── CẬP NHẬT theo ID ────────────────────────────────────────────
         if ($id > 0) {
@@ -498,14 +510,11 @@ class TGS_HTSoft_Stock_Converter
         $product_table = self::table_product();
 
         $keyword  = isset($_POST['keyword'])  ? sanitize_text_field(wp_unslash($_POST['keyword'])) : '';
-        $page     = isset($_POST['page'])     ? max(1, (int) $_POST['page'])                       : 1;
-        $per_page = isset($_POST['per_page']) ? max(10, min(200, (int) $_POST['per_page']))        : 50;
-        $offset   = ($page - 1) * $per_page;
+        $show_all = !empty($_POST['show_all']);
 
         if ($keyword !== '') {
             $like = '%' . $wpdb->esc_like($keyword) . '%';
-            $sql  = $wpdb->prepare(
-                "SELECT
+            $kw_sql_base = "SELECT
                     m.global_htsoft_stock_convert_id,
                     m.global_product_sku,
                     m.convert_unit,
@@ -527,29 +536,12 @@ class TGS_HTSoft_Stock_Converter
                      OR p.local_product_name LIKE %s
                      OR p.local_product_barcode_main LIKE %s
                    )
-                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC
-                 LIMIT %d OFFSET %d",
-                $like, $like, $like, $like, $per_page, $offset
-            );
-
-            $total_sql = $wpdb->prepare(
-                "SELECT COUNT(*)
-                 FROM {$mapping_table} m
-                 LEFT JOIN {$product_table} p
-                     ON BINARY p.local_product_sku = m.global_product_sku
-                    AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
-                 WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
-                   AND (
-                     m.global_product_sku LIKE %s
-                     OR m.convert_unit LIKE %s
-                     OR p.local_product_name LIKE %s
-                     OR p.local_product_barcode_main LIKE %s
-                   )",
-                $like, $like, $like, $like
-            );
+                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
+            $sql = $show_all
+                ? $wpdb->prepare($kw_sql_base, $like, $like, $like, $like)
+                : $wpdb->prepare($kw_sql_base . ' LIMIT 101', $like, $like, $like, $like);
         } else {
-            $sql = $wpdb->prepare(
-                "SELECT
+            $base_sql = "SELECT
                     m.global_htsoft_stock_convert_id,
                     m.global_product_sku,
                     m.convert_unit,
@@ -565,22 +557,23 @@ class TGS_HTSoft_Stock_Converter
                      ON BINARY p.local_product_sku = m.global_product_sku
                     AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                  WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
-                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC
-                 LIMIT %d OFFSET %d",
-                $per_page, $offset
-            );
-
-            $total_sql = "SELECT COUNT(*) FROM {$mapping_table} WHERE (is_deleted = 0 OR is_deleted IS NULL)";
+                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $sql = $show_all ? $base_sql : $base_sql . ' LIMIT 101';
         }
 
-        $rows  = $wpdb->get_results($sql, ARRAY_A);
-        $total = (int) $wpdb->get_var($total_sql);
+        $rows     = $wpdb->get_results($sql, ARRAY_A) ?: [];
+        $has_more = false;
+        if (!$show_all && count($rows) > 100) {
+            $has_more = true;
+            $rows     = array_slice($rows, 0, 100);
+        }
+        $total = count($rows);
 
         self::success([
-            'mappings' => $rows ?: [],
-            'total'    => $total,
-            'page'     => $page,
-            'per_page' => $per_page,
+            'mappings'  => $rows,
+            'total'     => $total,
+            'has_more'  => $has_more,
         ]);
     }
 
