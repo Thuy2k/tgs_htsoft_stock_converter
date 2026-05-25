@@ -741,6 +741,7 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_unit,
                 m.convert_to_htsoft,
                 m.convert_note,
+                m.unit_price,
                 p.local_product_name
              FROM {$mapping_table} m
              LEFT JOIN {$product_table} p
@@ -754,12 +755,14 @@ class TGS_HTSoft_Stock_Converter
         $export = [];
         foreach ($rows as $row) {
             $ratio = self::parse_positive_decimal($row['convert_to_htsoft'], 1);
+            $price = ($row['unit_price'] !== null && $row['unit_price'] !== '') ? (float) $row['unit_price'] : null;
             $export[] = [
                 'global_product_sku' => $row['global_product_sku'],
                 'local_product_name' => (string) ($row['local_product_name'] ?? ''),
                 'convert_unit'       => (string) ($row['convert_unit'] ?? ''),
                 'convert_to_htsoft'  => (float)  $ratio,
                 'convert_note'       => (string) ($row['convert_note'] ?? ''),
+                'unit_price'         => $price,
             ];
         }
 

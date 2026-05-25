@@ -485,13 +485,15 @@
                 var rows = res.data.rows || [];
                 if (!rows.length) { toast('Khong co du lieu de xuat.', 'error'); return; }
 
-                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Ghi chu']];
+                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Gia ban (VND)', 'Ghi chu']];
                 rows.forEach(function (r) {
+                    var price = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '') ? r.unit_price : '';
                     data.push([
                         r.global_product_sku,
                         r.local_product_name || '',
                         r.convert_unit || '',
                         r.convert_to_htsoft,
+                        price,
                         r.convert_note || '',
                     ]);
                 });
