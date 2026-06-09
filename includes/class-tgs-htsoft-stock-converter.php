@@ -165,10 +165,9 @@ class TGS_HTSoft_Stock_Converter
     private static function table_product()
     {
         global $wpdb;
-        if (defined('TGS_TABLE_LOCAL_PRODUCT_NAME')) {
-            return TGS_TABLE_LOCAL_PRODUCT_NAME;
-        }
-        return $wpdb->prefix . 'local_product_name';
+        return defined('TGS_TABLE_GLOBAL_PRODUCT_NAME')
+            ? TGS_TABLE_GLOBAL_PRODUCT_NAME
+            : $wpdb->base_prefix . 'global_product_name';
     }
 
     private static function parse_positive_decimal($value, $default = 1)
@@ -229,35 +228,35 @@ class TGS_HTSoft_Stock_Converter
         $name_conditions = [];
         $values          = [];
         foreach ($tokens as $token) {
-            $name_conditions[] = 'p.local_product_name LIKE %s';
+            $name_conditions[] = 'p.global_product_name LIKE %s';
             $values[]          = '%' . $wpdb->esc_like($token) . '%';
         }
         if (empty($name_conditions)) {
-            $name_conditions[] = 'p.local_product_name LIKE %s';
+            $name_conditions[] = 'p.global_product_name LIKE %s';
             $values[]          = $like;
         }
         $name_where = implode(' AND ', $name_conditions);
 
         $sql = "SELECT
-                    p.local_product_name,
-                    p.local_product_sku,
-                    p.local_product_barcode_main,
-                    p.local_product_unit,
-                    p.local_product_quantity_no_tracking,
+                    p.global_product_name AS local_product_name,
+                    p.global_product_sku AS local_product_sku,
+                    p.global_product_barcode_main AS local_product_barcode_main,
+                    p.global_product_unit AS local_product_unit,
+                    0 AS local_product_quantity_no_tracking,
                     COUNT(m.global_htsoft_stock_convert_id) AS config_count
                 FROM {$table} p
                 LEFT JOIN {$mapping_table} m
-                    ON BINARY m.global_product_sku = p.local_product_sku
+                    ON BINARY m.global_product_sku = p.global_product_sku
                    AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
                 WHERE (p.is_deleted = 0 OR p.is_deleted IS NULL)
-                  AND (p.local_product_is_tracking = 0 OR p.local_product_is_tracking IS NULL)
+                  AND (p.global_product_is_tracking = 0 OR p.global_product_is_tracking IS NULL)
                   AND (
                     ({$name_where})
-                    OR p.local_product_barcode_main LIKE %s
-                    OR p.local_product_sku LIKE %s
+                    OR p.global_product_barcode_main LIKE %s
+                    OR p.global_product_sku LIKE %s
                   )
-                GROUP BY p.local_product_sku
-                ORDER BY p.local_product_name ASC
+                GROUP BY p.global_product_sku
+                ORDER BY p.global_product_name ASC
                 LIMIT 30";
 
         $values[] = $like;
@@ -523,18 +522,18 @@ class TGS_HTSoft_Stock_Converter
                     m.convert_note,
                     m.unit_price,
                     m.updated_at,
-                    p.local_product_name,
-                    p.local_product_unit
+                    p.global_product_name AS local_product_name,
+                    p.global_product_unit AS local_product_unit
                  FROM {$mapping_table} m
                  LEFT JOIN {$product_table} p
-                     ON BINARY p.local_product_sku = m.global_product_sku
+                     ON BINARY p.global_product_sku = m.global_product_sku
                     AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                  WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
                    AND (
                      m.global_product_sku LIKE %s
                      OR m.convert_unit LIKE %s
-                     OR p.local_product_name LIKE %s
-                     OR p.local_product_barcode_main LIKE %s
+                     OR p.global_product_name LIKE %s
+                     OR p.global_product_barcode_main LIKE %s
                    )
                  ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
             $sql = $show_all
@@ -550,11 +549,11 @@ class TGS_HTSoft_Stock_Converter
                     m.convert_note,
                     m.unit_price,
                     m.updated_at,
-                    p.local_product_name,
-                    p.local_product_unit
+                    p.global_product_name AS local_product_name,
+                    p.global_product_unit AS local_product_unit
                  FROM {$mapping_table} m
                  LEFT JOIN {$product_table} p
-                     ON BINARY p.local_product_sku = m.global_product_sku
+                     ON BINARY p.global_product_sku = m.global_product_sku
                     AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                  WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
                  ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
@@ -605,11 +604,11 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_from_tgs,
                 m.convert_to_htsoft,
                 m.convert_note,
-                p.local_product_name,
-                p.local_product_unit
+                p.global_product_name AS local_product_name,
+                p.global_product_unit AS local_product_unit
              FROM {$mapping_table} m
              LEFT JOIN {$product_table} p
-                 ON BINARY p.local_product_sku = m.global_product_sku
+                 ON BINARY p.global_product_sku = m.global_product_sku
                 AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
              WHERE m.global_htsoft_stock_convert_id = %d
                AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
@@ -742,10 +741,10 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
-                p.local_product_name
+                p.global_product_name AS local_product_name
              FROM {$mapping_table} m
              LEFT JOIN {$product_table} p
-                 ON BINARY p.local_product_sku = m.global_product_sku
+                 ON BINARY p.global_product_sku = m.global_product_sku
                 AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
              WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
              ORDER BY m.global_product_sku ASC, m.convert_unit ASC",
