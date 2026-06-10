@@ -209,6 +209,17 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                             </div>
                                             <div class="form-text">Giá bán theo DVT này. Để trống nếu chưa xác định.</div>
                                         </div>
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label">
+                                                Khối lượng <span class="text-muted small">(kg/1 DVT)</span>
+                                            </label>
+                                            <div class="input-group">
+                                                <input type="number" class="form-control" id="cfgUnitWeightKg"
+                                                       min="0" step="0.001" placeholder="VD: 2.3">
+                                                <span class="input-group-text">kg</span>
+                                            </div>
+                                            <div class="form-text">Khối lượng của 1 đơn vị tính bán. Để trống nếu chưa cấu hình.</div>
+                                        </div>
                                     </div>
                                         <button type="button" class="btn btn-primary" id="btnSaveMapping">
                                             <i class="bx bx-save me-1"></i>Lưu cấu hình
@@ -264,7 +275,9 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                 Cột <strong>B</strong> Tên hàng <em class="text-muted">(bỏ qua)</em>&nbsp;·&nbsp;
                                 Cột <strong>C</strong> Đơn vị tính&nbsp;·&nbsp;
                                 Cột <strong>D</strong> Tỷ lệ quy đổi&nbsp;·&nbsp;
-                                Cột <strong>E</strong> Ghi chú
+                                Cột <strong>E</strong> Giá bán&nbsp;·&nbsp;
+                                Cột <strong>F</strong> Khối lượng kg/1 DVT&nbsp;·&nbsp;
+                                Cột <strong>G</strong> Ghi chú
                             </span>
                             <span class="ms-2 text-muted">— Dòng 1 là tiêu đề, dữ liệu từ dòng 2.</span>
                         </div>
@@ -290,6 +303,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                             <th>DVT bán</th>
                                             <th>Tỷ lệ</th>
                                             <th>Giá bán</th>
+                                            <th>Kg/1 DVT</th>
                                             <th>Ghi chú POS</th>
                                             <th style="width:100px;">Thao tác</th>
                                         </tr>

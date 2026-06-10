@@ -50,6 +50,7 @@
         cfgConvertToHtsoft:    el('cfgConvertToHtsoft'),
         cfgNote:               el('cfgNote'),
         cfgUnitPrice:          el('cfgUnitPrice'),
+        cfgUnitWeightKg:       el('cfgUnitWeightKg'),
         cfgRatioPreview:       el('cfgRatioPreview'),
         cfgEditTitle:          el('cfgEditTitle'),
         cfgFormMode:           el('cfgFormMode'),
@@ -208,16 +209,20 @@
         }
 
         var html = '<table class="table table-sm tgs-config-table mb-0"><thead><tr>' +
-            '<th>Don vi tinh</th><th>Ty le</th><th>Gia ban</th><th>Ghi chu</th><th></th>' +
+            '<th>Don vi tinh</th><th>Ty le</th><th>Gia ban</th><th>Kg/1 DVT</th><th>Ghi chu</th><th></th>' +
             '</tr></thead><tbody>';
         configs.forEach(function (c) {
             var priceCell = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '')
                 ? '<span class="text-success">' + formatPrice(parseFloat(c.unit_price)) + '</span>'
                 : '<em class="text-muted">—</em>';
+            var weightCell = (c.unit_weight_kg !== null && c.unit_weight_kg !== undefined && c.unit_weight_kg !== '')
+                ? '<span class="text-info">' + formatWeight(parseFloat(c.unit_weight_kg)) + ' kg</span>'
+                : '<em class="text-muted">—</em>';
             html += '<tr>' +
                 '<td>' + (c.convert_unit ? escHtml(c.convert_unit) : '<em class="text-muted">mac dinh</em>') + '</td>' +
                 '<td>' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
                 '<td>' + priceCell + '</td>' +
+                '<td>' + weightCell + '</td>' +
                 '<td class="text-muted small">' + escHtml(c.convert_note || '') + '</td>' +
                 '<td class="text-end text-nowrap">' +
                 '<button class="btn btn-xs btn-outline-primary me-1" data-cfg-edit="' + c.global_htsoft_stock_convert_id + '">' +
@@ -256,6 +261,7 @@
         if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = c.convert_to_htsoft;
         if (dom.cfgNote)            dom.cfgNote.value             = c.convert_note || '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '') ? c.unit_price : '';
+        if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = (c.unit_weight_kg !== null && c.unit_weight_kg !== undefined && c.unit_weight_kg !== '') ? c.unit_weight_kg : '';
         if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Chỉnh sửa';
         if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-edit-alt me-1 text-warning"></i>Chỉnh sửa DVT: ' + escHtml(c.convert_unit || 'mặc định');
         updateRatioPreview();
@@ -271,6 +277,7 @@
         if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = '';
         if (dom.cfgNote)            dom.cfgNote.value             = '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = '';
+        if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = '';
         if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Thêm mới';
         if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-plus-circle me-1 text-primary"></i>Thêm cấu hình DVT mới';
         updateRatioPreview();
@@ -298,6 +305,11 @@
         return n.toLocaleString('vi-VN');
     }
 
+    function formatWeight(n) {
+        if (isNaN(n)) return '—';
+        return parseFloat(n.toFixed(3)).toString();
+    }
+
     function saveMapping() {
         var sku = dom.cfgSku ? dom.cfgSku.value : '';
         if (!sku) { toast('Vui long chon san pham truoc.', 'error'); return; }
@@ -307,6 +319,7 @@
         var toHtsoft = (dom.cfgConvertToHtsoft ? dom.cfgConvertToHtsoft.value : '').trim();
         var note     = (dom.cfgNote            ? dom.cfgNote.value            : '').trim();
         var rawPrice = (dom.cfgUnitPrice       ? dom.cfgUnitPrice.value       : '').trim();
+        var rawWeight = (dom.cfgUnitWeightKg   ? dom.cfgUnitWeightKg.value    : '').trim();
 
         if (!unit && id === 0) { toast('Vui long nhap ten Don Vi Tinh.', 'error'); return; }
         if (!toHtsoft || parseFloat(toHtsoft.replace(',', '.')) <= 0) {
@@ -323,6 +336,7 @@
             convert_to_htsoft:  toHtsoft.replace(',', '.'),
             convert_note:       note,
             unit_price:         rawPrice,
+            unit_weight_kg:     rawWeight.replace(',', '.'),
         }).then(function (res) {
             if (res.success) {
                 toast(res.data.message || 'Da luu.', 'success');
@@ -363,7 +377,7 @@
 
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="7" class="text-center text-muted py-3">'
+                '<tr><td colspan="8" class="text-center text-muted py-3">'
                 + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</td></tr>';
         }
 
@@ -384,14 +398,14 @@
                 } else {
                     if (dom.mappingTableBody) {
                         dom.mappingTableBody.innerHTML =
-                            '<tr><td colspan="7" class="text-center text-danger">Lỗi tải dữ liệu.</td></tr>';
+                            '<tr><td colspan="8" class="text-center text-danger">Lỗi tải dữ liệu.</td></tr>';
                     }
                 }
             })
             .catch(function () {
                 if (dom.mappingTableBody) {
                     dom.mappingTableBody.innerHTML =
-                        '<tr><td colspan="7" class="text-center text-danger">Lỗi kết nối.</td></tr>';
+                        '<tr><td colspan="8" class="text-center text-danger">Lỗi kết nối.</td></tr>';
                 }
             });
     }
@@ -415,7 +429,7 @@
     function renderMappingsTable(rows) {
         if (!dom.mappingTableBody) return;
         if (!rows.length) {
-            dom.mappingTableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Khong co du lieu</td></tr>';
+            dom.mappingTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Khong co du lieu</td></tr>';
             return;
         }
         var html = '';
@@ -423,12 +437,16 @@
             var priceCell = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '')
                 ? '<span class="text-success fw-semibold">' + formatPrice(parseFloat(r.unit_price)) + '</span>'
                 : '<em class="text-muted small">—</em>';
+            var weightCell = (r.unit_weight_kg !== null && r.unit_weight_kg !== undefined && r.unit_weight_kg !== '')
+                ? '<span class="text-info fw-semibold">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
+                : '<em class="text-muted small">—</em>';
             html += '<tr>' +
                 '<td><code>' + escHtml(r.global_product_sku) + '</code></td>' +
                 '<td>' + escHtml(r.local_product_name || '') + '</td>' +
                 '<td>' + (r.convert_unit ? escHtml(r.convert_unit) : '<em class="text-muted">mac dinh</em>') + '</td>' +
                 '<td>' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</td>' +
                 '<td>' + priceCell + '</td>' +
+                '<td>' + weightCell + '</td>' +
                 '<td class="text-muted small">' + escHtml(r.convert_note || '') + '</td>' +
                 '<td class="text-nowrap">' +
                 '<button class="btn btn-xs btn-outline-primary me-1" data-tbl-edit="' + r.global_htsoft_stock_convert_id + '">' +
@@ -485,15 +503,17 @@
                 var rows = res.data.rows || [];
                 if (!rows.length) { toast('Khong co du lieu de xuat.', 'error'); return; }
 
-                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Gia ban (VND)', 'Ghi chu']];
+                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Gia ban (VND)', 'Khoi luong kg/1 DVT', 'Ghi chu']];
                 rows.forEach(function (r) {
                     var price = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '') ? r.unit_price : '';
+                    var weight = (r.unit_weight_kg !== null && r.unit_weight_kg !== undefined && r.unit_weight_kg !== '') ? r.unit_weight_kg : '';
                     data.push([
                         r.global_product_sku,
                         r.local_product_name || '',
                         r.convert_unit || '',
                         r.convert_to_htsoft,
                         price,
+                        weight,
                         r.convert_note || '',
                     ]);
                 });
@@ -580,9 +600,34 @@
                     var sku   = String(row[0] || '').trim();
                     var unit  = String(row[2] || '').trim();
                     var ratio = parseFloat(String(row[3] || '').replace(',', '.'));
-                    var note  = String(row[4] || '').trim();
+                    var rawPrice = String(row[4] || '').trim();
+                    var rawCol5 = String(row[5] || '').trim();
+                    var rawCol6 = String(row[6] || '').trim();
+                    var weight = '';
+                    var note = '';
+                    if (rawCol6 !== '') {
+                        weight = rawCol5;
+                        note = rawCol6;
+                    } else if (rawCol5 !== '') {
+                        var col5Number = parseFloat(rawCol5.replace(',', '.'));
+                        if (!isNaN(col5Number)) {
+                            weight = rawCol5;
+                        } else {
+                            note = rawCol5;
+                        }
+                    } else {
+                        note = rawPrice;
+                        rawPrice = '';
+                    }
                     if (!sku || !ratio || ratio <= 0) continue;
-                    rows.push({ global_product_sku: sku, convert_unit: unit, convert_to_htsoft: ratio, convert_note: note });
+                    rows.push({
+                        global_product_sku: sku,
+                        convert_unit: unit,
+                        convert_to_htsoft: ratio,
+                        unit_price: rawPrice,
+                        unit_weight_kg: weight,
+                        convert_note: note
+                    });
                 }
 
                 if (!rows.length) { toast('Khong co dong du lieu hop le trong file.', 'error'); return; }

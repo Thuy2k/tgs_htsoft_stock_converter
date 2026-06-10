@@ -180,6 +180,22 @@ class TGS_HTSoft_Stock_Converter
         return $num;
     }
 
+    private static function parse_optional_decimal($value)
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+
+        $raw = str_replace(',', '.', $raw);
+        if (!is_numeric($raw)) {
+            return null;
+        }
+
+        $num = (float) $raw;
+        return $num > 0 ? $num : null;
+    }
+
     private static function format_ratio_text($value)
     {
         $number = self::parse_positive_decimal($value, 1);
@@ -297,6 +313,7 @@ class TGS_HTSoft_Stock_Converter
                 convert_to_htsoft,
                 convert_note,
                 unit_price,
+                unit_weight_kg,
                 updated_at
              FROM {$mapping_table}
              WHERE BINARY global_product_sku = %s
@@ -344,6 +361,9 @@ class TGS_HTSoft_Stock_Converter
             }
         }
 
+        // Khối lượng kg của 1 DVT (tuỳ chọn, NULL nếu để trống)
+        $unit_weight_kg = self::parse_optional_decimal($_POST['unit_weight_kg'] ?? '');
+
         if ($sku === '') {
             self::error('Thiếu SKU sản phẩm.');
             return;
@@ -367,12 +387,25 @@ class TGS_HTSoft_Stock_Converter
             'convert_to_htsoft'  => $to_htsoft,
             'convert_note'       => $note,
             'unit_price'         => $unit_price,
+            'unit_weight_kg'     => $unit_weight_kg,
             'user_id'            => $user_id,
             'is_deleted'         => 0,
             'deleted_at'         => null,
             'updated_at'         => $now,
         ];
-        $formats = ['%s', '%s', '%f', '%f', '%s', $unit_price !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
+        $formats = [
+            '%s',
+            '%s',
+            '%f',
+            '%f',
+            '%s',
+            $unit_price !== null ? '%f' : '%s',
+            $unit_weight_kg !== null ? '%f' : '%s',
+            '%d',
+            '%d',
+            '%s',
+            '%s',
+        ];
 
         // ── CẬP NHẬT theo ID ────────────────────────────────────────────
         if ($id > 0) {
@@ -521,6 +554,7 @@ class TGS_HTSoft_Stock_Converter
                     m.convert_to_htsoft,
                     m.convert_note,
                     m.unit_price,
+                    m.unit_weight_kg,
                     m.updated_at,
                     p.global_product_name AS local_product_name,
                     p.global_product_unit AS local_product_unit
@@ -548,6 +582,7 @@ class TGS_HTSoft_Stock_Converter
                     m.convert_to_htsoft,
                     m.convert_note,
                     m.unit_price,
+                    m.unit_weight_kg,
                     m.updated_at,
                     p.global_product_name AS local_product_name,
                     p.global_product_unit AS local_product_unit
@@ -604,6 +639,8 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_from_tgs,
                 m.convert_to_htsoft,
                 m.convert_note,
+                m.unit_price,
+                m.unit_weight_kg,
                 p.global_product_name AS local_product_name,
                 p.global_product_unit AS local_product_unit
              FROM {$mapping_table} m
@@ -646,7 +683,7 @@ class TGS_HTSoft_Stock_Converter
         $mapping_table = self::table_mapping();
         $sql = $wpdb->prepare(
             "SELECT global_htsoft_stock_convert_id, global_product_sku, convert_unit,
-                    convert_from_tgs, convert_to_htsoft, convert_note, updated_at
+                    convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg, updated_at
              FROM {$mapping_table}
              WHERE BINARY global_product_sku = %s
                AND (is_deleted = 0 OR is_deleted IS NULL)
@@ -691,7 +728,7 @@ class TGS_HTSoft_Stock_Converter
 
         $mapping_table = self::table_mapping();
         $placeholders  = implode(',', array_fill(0, count($skus), '%s'));
-        $sql = "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note
+        $sql = "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg
                 FROM {$mapping_table}
                 WHERE (is_deleted = 0 OR is_deleted IS NULL)
                   AND global_product_sku IN ({$placeholders})";
@@ -712,6 +749,8 @@ class TGS_HTSoft_Stock_Converter
                     'convert_from_tgs'  => (float) ($row['convert_from_tgs']  ?? 1),
                     'convert_to_htsoft' => (float) ($row['convert_to_htsoft'] ?? 1),
                     'convert_note'      => (string) ($row['convert_note']     ?? ''),
+                    'unit_price'        => ($row['unit_price'] !== null && $row['unit_price'] !== '') ? (float) $row['unit_price'] : null,
+                    'unit_weight_kg'    => ($row['unit_weight_kg'] !== null && $row['unit_weight_kg'] !== '') ? (float) $row['unit_weight_kg'] : null,
                 ];
             }
         }
@@ -741,6 +780,7 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
+                m.unit_weight_kg,
                 p.global_product_name AS local_product_name
              FROM {$mapping_table} m
              LEFT JOIN {$product_table} p
@@ -755,6 +795,7 @@ class TGS_HTSoft_Stock_Converter
         foreach ($rows as $row) {
             $ratio = self::parse_positive_decimal($row['convert_to_htsoft'], 1);
             $price = ($row['unit_price'] !== null && $row['unit_price'] !== '') ? (float) $row['unit_price'] : null;
+            $weight = ($row['unit_weight_kg'] !== null && $row['unit_weight_kg'] !== '') ? (float) $row['unit_weight_kg'] : null;
             $export[] = [
                 'global_product_sku' => $row['global_product_sku'],
                 'local_product_name' => (string) ($row['local_product_name'] ?? ''),
@@ -762,6 +803,7 @@ class TGS_HTSoft_Stock_Converter
                 'convert_to_htsoft'  => (float)  $ratio,
                 'convert_note'       => (string) ($row['convert_note'] ?? ''),
                 'unit_price'         => $price,
+                'unit_weight_kg'     => $weight,
             ];
         }
 
@@ -816,6 +858,8 @@ class TGS_HTSoft_Stock_Converter
 
             $to_htsoft = self::parse_positive_decimal($item['convert_to_htsoft'] ?? 1, 1);
             $note      = isset($item['convert_note']) ? sanitize_text_field((string) $item['convert_note']) : '';
+            $unit_price = self::parse_optional_decimal($item['unit_price'] ?? '');
+            $unit_weight_kg = self::parse_optional_decimal($item['unit_weight_kg'] ?? '');
             if ($note === '') {
                 $note = self::build_default_note($unit, $to_htsoft);
             }
@@ -826,12 +870,26 @@ class TGS_HTSoft_Stock_Converter
                 'convert_from_tgs'   => 1,
                 'convert_to_htsoft'  => $to_htsoft,
                 'convert_note'       => $note,
+                'unit_price'         => $unit_price,
+                'unit_weight_kg'     => $unit_weight_kg,
                 'user_id'            => $user_id,
                 'is_deleted'         => 0,
                 'deleted_at'         => null,
                 'updated_at'         => $now,
             ];
-            $formats = ['%s', '%s', '%f', '%f', '%s', '%d', '%d', '%s', '%s'];
+            $formats = [
+                '%s',
+                '%s',
+                '%f',
+                '%f',
+                '%s',
+                $unit_price !== null ? '%f' : '%s',
+                $unit_weight_kg !== null ? '%f' : '%s',
+                '%d',
+                '%d',
+                '%s',
+                '%s',
+            ];
 
             // Tìm row theo (sku, unit) — unicode_ci → case-insensitive cho unit
             $existing_id = $wpdb->get_var($wpdb->prepare(
@@ -895,7 +953,7 @@ class TGS_HTSoft_Stock_Converter
 
         $mapping_table = self::table_mapping();
         $rows = $wpdb->get_results(
-            "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note, updated_at
+            "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note, unit_weight_kg, updated_at
              FROM {$mapping_table}
              WHERE (is_deleted = 0 OR is_deleted IS NULL)
              ORDER BY global_product_sku ASC, convert_unit ASC",
@@ -987,6 +1045,7 @@ class TGS_HTSoft_Stock_Converter
 
             $to_htsoft = self::parse_positive_decimal($item['convert_to_htsoft'] ?? 1, 1);
             $note      = isset($item['convert_note']) ? sanitize_textarea_field((string) $item['convert_note']) : '';
+            $unit_weight_kg = self::parse_optional_decimal($item['unit_weight_kg'] ?? '');
             if ($note === '') {
                 $note = self::build_default_note($unit, $to_htsoft);
             }
@@ -997,12 +1056,13 @@ class TGS_HTSoft_Stock_Converter
                 'convert_from_tgs'   => 1,
                 'convert_to_htsoft'  => $to_htsoft,
                 'convert_note'       => $note,
+                'unit_weight_kg'     => $unit_weight_kg,
                 'user_id'            => $user_id,
                 'is_deleted'         => 0,
                 'deleted_at'         => null,
                 'updated_at'         => $now,
             ];
-            $formats = ['%s', '%s', '%f', '%f', '%s', '%d', '%d', '%s', '%s'];
+            $formats = ['%s', '%s', '%f', '%f', '%s', $unit_weight_kg !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
 
             $existing_id = $wpdb->get_var($wpdb->prepare(
                 "SELECT global_htsoft_stock_convert_id
