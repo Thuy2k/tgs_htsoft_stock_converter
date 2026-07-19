@@ -810,8 +810,13 @@
                 resultDone:     document.getElementById('piResultDone'),
                 resultStopped:  document.getElementById('piResultStopped'),
                 statUpdated:    document.getElementById('piStatUpdated'),
+                statNoChange:   document.getElementById('piStatNoChange'),
                 statSkipped:    document.getElementById('piStatSkipped'),
                 statBatch:      document.getElementById('piStatBatch'),
+                detailsWrap:    document.getElementById('piDetailsWrap'),
+                detailsBody:    document.getElementById('piDetailsBody'),
+                detailsBodyContent: document.getElementById('piDetailsBodyContent'),
+                toggleDetails:  document.getElementById('piToggleDetails'),
                 errorsWrap:     document.getElementById('piErrorsWrap'),
                 errorsUl:       document.getElementById('piErrorsUl'),
                 stopBtn:        document.getElementById('piStopBtn'),
@@ -841,11 +846,18 @@
                 var unit = (row[2] !== undefined && row[2] !== null) ? String(row[2]).trim() : '';
                 var raw  = (row[3] !== undefined && row[3] !== null) ? row[3] : '';
                 if (!sku) continue;
-                // Loại bỏ dấu chấm phẩy, khoảng trắng, đổi dấu phẩy thành dấu chấm
                 var priceStr = String(raw).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
                 var price    = priceStr !== '' ? parseFloat(priceStr) : null;
                 rows.push({ sku: sku, unit: unit, price: (price > 0 ? price : null) });
             }
+            // Sắp xếp theo SKU để các dòng cùng mã hàng gần nhau
+            rows.sort(function (a, b) {
+                if (a.sku < b.sku) return -1;
+                if (a.sku > b.sku) return 1;
+                if (a.price !== null && b.price === null) return -1;
+                if (a.price === null && b.price !== null) return 1;
+                return 0;
+            });
             if (!rows.length) {
                 toast('File không có dữ liệu hợp lệ (cần ít nhất 1 dòng có SKU).', 'error');
                 return;
@@ -872,15 +884,19 @@
         d.resultDone.classList.add('d-none');
         d.resultStopped.classList.add('d-none');
         d.statUpdated.textContent = '0';
+        d.statNoChange.textContent = '0';
         d.statSkipped.textContent = '0';
         d.statBatch.textContent   = '0/' + Math.ceil(rows.length / PRICE_BATCH_SIZE);
+        d.detailsWrap.classList.add('d-none');
+        d.detailsBody.classList.add('d-none');
+        d.detailsBodyContent.innerHTML = '';
         d.errorsWrap.classList.add('d-none');
         d.errorsUl.innerHTML = '';
 
         d.stopBtn.disabled  = false;
         d.closeBtn.disabled = true;
 
-        _piState = { stopped: false, updated: 0, skipped: 0, errors: [], batchDone: 0 };
+        _piState = { stopped: false, updated: 0, no_change: 0, skipped: 0, details: [], errors: [], batchDone: 0 };
 
         d.stopBtn.onclick = function () {
             _piState.stopped = true;
@@ -919,7 +935,12 @@
             }).then(function (res) {
                 if (res.success) {
                     _piState.updated += (res.data.updated || 0);
+                    _piState.no_change += (res.data.no_change || 0);
                     _piState.skipped += (res.data.skipped || 0);
+                    var dets = res.data.details || [];
+                    if (dets.length) {
+                        _piState.details = _piState.details.concat(dets);
+                    }
                     var errs = res.data.errors || [];
                     if (errs.length) {
                         _piState.errors = _piState.errors.concat(errs);
@@ -930,6 +951,7 @@
                 }
                 _piState.batchDone++;
                 d.statUpdated.textContent = _piState.updated;
+                d.statNoChange.textContent = _piState.no_change;
                 d.statSkipped.textContent = _piState.skipped;
                 processBatch(batchIdx + 1);
             }).catch(function (err) {
@@ -954,12 +976,22 @@
             d.resultStopped.classList.remove('d-none');
         } else {
             d.resultDone.classList.remove('d-none');
-            d.resultDone.innerHTML = '<i class="bx bx-check-circle me-1"></i>Import giá xong!';
+            d.resultDone.innerHTML = '<i class="bx bx-check-circle me-1"></i>Import giá xong! ' +
+                'Cập nhật: <strong>' + _piState.updated + '</strong>, ' +
+                'Không đổi: <strong>' + _piState.no_change + '</strong>, ' +
+                'Bỏ qua: <strong>' + _piState.skipped + '</strong>.';
         }
 
         d.statUpdated.textContent = _piState.updated;
+        d.statNoChange.textContent = _piState.no_change;
         d.statSkipped.textContent = _piState.skipped;
         d.statBatch.textContent   = _piState.batchDone + '/' + totalBatches;
+
+        // Hiển thị bảng chi tiết
+        if (_piState.details.length > 0 || _piState.errors.length > 0) {
+            d.detailsWrap.classList.remove('d-none');
+            renderPriceDetails(d);
+        }
 
         if (_piState.errors.length) {
             d.errorsWrap.classList.remove('d-none');
@@ -978,6 +1010,52 @@
 
         d.stopBtn.disabled  = true;
         d.closeBtn.disabled = false;
+
+        // Gán sự kiện toggle details
+        if (d.toggleDetails) {
+            // Xoá handler cũ để tránh chồng chéo
+            var newToggle = d.toggleDetails.cloneNode(true);
+            d.toggleDetails.parentNode.replaceChild(newToggle, d.toggleDetails);
+            d.toggleDetails = newToggle;
+            d.toggleDetails.addEventListener('click', function () {
+                var isHidden = d.detailsBody.classList.contains('d-none');
+                if (isHidden) {
+                    d.detailsBody.classList.remove('d-none');
+                    d.toggleDetails.innerHTML = '<i class="bx bx-hide"></i> Ẩn';
+                } else {
+                    d.detailsBody.classList.add('d-none');
+                    d.toggleDetails.innerHTML = '<i class="bx bx-show"></i> Hiện';
+                }
+            });
+        }
+    }
+
+    function renderPriceDetails(d) {
+        var items = _piState.details || [];
+        if (!d.detailsBodyContent) return;
+        var html = '';
+        items.forEach(function (item) {
+            var statusBadge = '';
+            if (item.status === 'updated') statusBadge = '<span class="badge bg-success">Đã cập nhật</span>';
+            else if (item.status === 'no_change') statusBadge = '<span class="badge bg-secondary">Không đổi</span>';
+            else statusBadge = '<span class="badge bg-warning text-dark">Bỏ qua</span>';
+
+            var oldPrice = (item.old_price !== null && item.old_price !== undefined)
+                ? formatPrice(parseFloat(item.old_price)) + '₫' : '—';
+            var newPrice = (item.new_price !== null && item.new_price !== undefined)
+                ? formatPrice(parseFloat(item.new_price)) + '₫' : '—';
+            var note = item.note || '';
+
+            html += '<tr>' +
+                '<td><code>' + escHtml(item.sku) + '</code></td>' +
+                '<td>' + escHtml(item.unit || '') + '</td>' +
+                '<td>' + oldPrice + '</td>' +
+                '<td>' + newPrice + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td class="text-muted">' + escHtml(note) + '</td>' +
+                '</tr>';
+        });
+        d.detailsBodyContent.innerHTML = html;
     }
 
     /* =========================================================================

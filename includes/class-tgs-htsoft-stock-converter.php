@@ -1116,18 +1116,16 @@ class TGS_HTSoft_Stock_Converter
     /**
      * Nhận batch các dòng giá từ JS, cập nhật cột unit_price trong bảng quy đổi.
      *
-     * Logic suy giá (mỗi nhóm SKU):
-     *   1. Ưu tiên giá từ Excel nếu có.
-     *   2. Nếu thiếu một số DVT:
-     *      - Tìm DVT có tỷ lệ = 1 (DVT lẻ) đã có giá → giá_DVT_khác = giá_lẻ × tỷ_lệ
-     *      - Nếu không có DVT lẻ nhưng có DVT khác → giá_lẻ = giá_DVT / tỷ_lệ → suy các DVT còn lại
-     *   3. Nếu Excel đã có giá cho DVT đó → dùng Excel (ưu tiên).
+     * Logic xử lý:
+     *   1. Chỉ xử lý các DVT có trong file Excel (không động đến DVT không có trong Excel)
+     *   2. Nếu Excel có giá → dùng giá đó trực tiếp
+     *   3. Nếu Excel không có giá → suy từ các DVT khác trong cùng SKU dựa vào tỷ lệ
+     *   4. Trả về chi tiết từng dòng: old_price, new_price, status (updated/no_change/skipped)
      *
      * POST params:
      *   rows_json  – JSON array of { sku, unit, price }  (từng batch ~200 dòng)
-     *               price là giá Excel (có thể null/'' nếu dòng không có giá)
      *
-     * Response: { updated, skipped, errors[] }
+     * Response: { updated, no_change, skipped, errors[], details[] }
      */
     public function ajax_import_price_rows()
     {
@@ -1146,17 +1144,18 @@ class TGS_HTSoft_Stock_Converter
         $mapping_table = self::table_mapping();
         $now           = current_time('mysql');
         $updated       = 0;
+        $no_change     = 0;
         $skipped       = 0;
         $errors        = [];
+        $details       = [];
 
         // ── Nhóm các dòng Excel theo SKU ──────────────────────────────────────
-        // Mỗi phần tử: [ 'sku' => '...', 'unit' => '...', 'price' => float|null ]
         $by_sku = [];
         foreach ($items as $idx => $item) {
-            if (!is_array($item)) { $skipped++; continue; }
+            if (!is_array($item)) { continue; }
             $sku  = isset($item['sku'])  ? sanitize_text_field(trim((string) $item['sku']))  : '';
             $unit = isset($item['unit']) ? sanitize_text_field(trim((string) $item['unit'])) : '';
-            if ($sku === '') { $skipped++; continue; }
+            if ($sku === '') { continue; }
 
             $raw_price = $item['price'] ?? null;
             $price     = null;
@@ -1174,7 +1173,7 @@ class TGS_HTSoft_Stock_Converter
         foreach ($by_sku as $sku => $excel_rows) {
             // Lấy toàn bộ cấu hình DB của SKU này
             $db_rows = $wpdb->get_results($wpdb->prepare(
-                "SELECT global_htsoft_stock_convert_id, convert_unit, convert_to_htsoft
+                "SELECT global_htsoft_stock_convert_id, convert_unit, convert_to_htsoft, unit_price
                  FROM {$mapping_table}
                  WHERE BINARY global_product_sku = %s
                    AND (is_deleted = 0 OR is_deleted IS NULL)",
@@ -1185,65 +1184,94 @@ class TGS_HTSoft_Stock_Converter
                 foreach ($excel_rows as $er) {
                     $skipped++;
                     $errors[] = "Dòng " . ($er['idx'] + 1) . " (SKU: {$sku}): không tìm thấy cấu hình trong DB.";
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => null,
+                        'new_price'  => null,
+                        'status'     => 'skipped',
+                        'note'       => 'Không tìm thấy cấu hình DVT trong DB',
+                    ];
                 }
                 continue;
             }
 
-            // Index DB theo unit (trim, lowercase để so sánh)
+            // Index DB rows theo unit (lowercase)
             $db_by_unit = [];
             foreach ($db_rows as $dr) {
-                $key = strtolower(trim($dr['convert_unit']));
-                $db_by_unit[$key] = $dr;
+                $db_by_unit[strtolower(trim($dr['convert_unit']))] = $dr;
             }
 
-            // Index Excel theo unit (lowercase)
-            $excel_by_unit = [];
+            // Tìm base price từ Excel rows có giá để suy cho DVT không có giá
+            $base_price_per_unit = null;
             foreach ($excel_rows as $er) {
-                $key = strtolower(trim($er['unit']));
-                $excel_by_unit[$key] = $er['price'];
-            }
-
-            // ── Suy giá cho các DVT chưa có trong Excel ───────────────────────
-            // 1. Tìm DVT "lẻ" (convert_to_htsoft gần nhất với 1) đã có giá trong Excel
-            $base_price_per_unit = null; // giá của 1 đơn vị nhỏ nhất (tỷ lệ 1)
-
-            // Tìm DVT có tỷ lệ = 1 và có giá Excel → base_price = excel_price / 1
-            foreach ($db_by_unit as $uk => $dr) {
-                $ratio = (float) $dr['convert_to_htsoft'];
-                if (abs($ratio - 1.0) < 0.0001 && isset($excel_by_unit[$uk]) && $excel_by_unit[$uk] !== null) {
-                    $base_price_per_unit = (float) $excel_by_unit[$uk];
-                    break;
-                }
-            }
-
-            // Nếu chưa tìm được từ DVT lẻ → suy từ DVT khác có giá trong Excel
-            if ($base_price_per_unit === null) {
-                foreach ($db_by_unit as $uk => $dr) {
-                    if (isset($excel_by_unit[$uk]) && $excel_by_unit[$uk] !== null) {
-                        $ratio = (float) $dr['convert_to_htsoft'];
+                if ($er['price'] !== null) {
+                    $uk = strtolower(trim($er['unit']));
+                    if (isset($db_by_unit[$uk])) {
+                        $ratio = (float) $db_by_unit[$uk]['convert_to_htsoft'];
                         if ($ratio > 0.0001) {
-                            $base_price_per_unit = (float) $excel_by_unit[$uk] / $ratio;
+                            $base_price_per_unit = (float) $er['price'] / $ratio;
                             break;
                         }
                     }
                 }
             }
 
-            // ── Cập nhật từng cấu hình DVT của SKU ───────────────────────────
-            foreach ($db_by_unit as $uk => $dr) {
-                $id    = (int) $dr['global_htsoft_stock_convert_id'];
-                $ratio = (float) $dr['convert_to_htsoft'];
+            // ── Chỉ xử lý các DVT có trong Excel ──────────────────────────────
+            foreach ($excel_rows as $er) {
+                $uk = strtolower(trim($er['unit']));
 
-                // Xác định giá sẽ lưu (ưu tiên Excel)
-                if (isset($excel_by_unit[$uk]) && $excel_by_unit[$uk] !== null) {
-                    $final_price = (float) $excel_by_unit[$uk];
+                if (!isset($db_by_unit[$uk])) {
+                    $skipped++;
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => null,
+                        'new_price'  => null,
+                        'status'     => 'skipped',
+                        'note'       => 'Không tìm thấy DVT "' . $er['unit'] . '" trong DB',
+                    ];
+                    continue;
+                }
+
+                $dr            = $db_by_unit[$uk];
+                $id            = (int) $dr['global_htsoft_stock_convert_id'];
+                $current_price = ($dr['unit_price'] !== null && $dr['unit_price'] !== '') ? (float) $dr['unit_price'] : null;
+                $ratio         = (float) $dr['convert_to_htsoft'];
+
+                // Xác định giá cuối: ưu tiên Excel, nếu không có thì suy từ base
+                if ($er['price'] !== null) {
+                    $final_price = (float) $er['price'];
                 } elseif ($base_price_per_unit !== null && $ratio > 0.0001) {
                     $final_price = round($base_price_per_unit * $ratio, 2);
                 } else {
                     $skipped++;
-                    continue; // không đủ thông tin để tính giá
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => $current_price,
+                        'new_price'  => null,
+                        'status'     => 'skipped',
+                        'note'       => 'Không có giá trong Excel và không đủ dữ liệu để quy đổi',
+                    ];
+                    continue;
                 }
 
+                // Kiểm tra nếu giá không thay đổi
+                if ($current_price !== null && abs($current_price - $final_price) < 0.001) {
+                    $no_change++;
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => $current_price,
+                        'new_price'  => $final_price,
+                        'status'     => 'no_change',
+                        'note'       => '',
+                    ];
+                    continue;
+                }
+
+                // Cập nhật DB
                 $result = $wpdb->update(
                     $mapping_table,
                     ['unit_price' => $final_price, 'updated_at' => $now],
@@ -1254,17 +1282,38 @@ class TGS_HTSoft_Stock_Converter
 
                 if ($result !== false) {
                     $updated++;
+                    $change_desc = $current_price !== null
+                        ? 'Đã đổi từ ' . number_format($current_price, 0, ',', '.') . '₫ → ' . number_format($final_price, 0, ',', '.') . '₫'
+                        : 'Đã đặt giá ' . number_format($final_price, 0, ',', '.') . '₫';
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => $current_price,
+                        'new_price'  => $final_price,
+                        'status'     => 'updated',
+                        'note'       => $change_desc,
+                    ];
                 } else {
                     $skipped++;
-                    $errors[] = "SKU: {$sku}, DVT: {$dr['convert_unit']}: lỗi cập nhật.";
+                    $errors[] = "SKU: {$sku}, DVT: {$er['unit']}: lỗi cập nhật.";
+                    $details[] = [
+                        'sku'        => $sku,
+                        'unit'       => $er['unit'],
+                        'old_price'  => $current_price,
+                        'new_price'  => $final_price,
+                        'status'     => 'skipped',
+                        'note'       => 'Lỗi cập nhật DB',
+                    ];
                 }
             }
         }
 
         self::success([
-            'updated' => $updated,
-            'skipped' => $skipped,
-            'errors'  => $errors,
-        ], "Cập nhật giá xong. Đã cập nhật: {$updated}, bỏ qua: {$skipped}.");
+            'updated'   => $updated,
+            'no_change' => $no_change,
+            'skipped'   => $skipped,
+            'errors'    => $errors,
+            'details'   => $details,
+        ], "Cập nhật giá xong. Đã cập nhật: {$updated}, không đổi: {$no_change}, bỏ qua: {$skipped}.");
     }
 }

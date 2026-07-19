@@ -452,23 +452,53 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                         <i class="bx bx-stop-circle me-1"></i>Đã dừng.
                     </div>
                     <div class="row g-2 text-center mb-2">
-                        <div class="col-4">
+                        <div class="col-3">
                             <div class="border rounded py-2">
                                 <div class="fs-5 fw-bold text-success" id="piStatUpdated">0</div>
                                 <div class="small text-muted">Đã cập nhật giá</div>
                             </div>
                         </div>
-                        <div class="col-4">
+                        <div class="col-3">
                             <div class="border rounded py-2">
-                                <div class="fs-5 fw-bold text-secondary" id="piStatSkipped">0</div>
+                                <div class="fs-5 fw-bold text-secondary" id="piStatNoChange">0</div>
+                                <div class="small text-muted">Không thay đổi</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded py-2">
+                                <div class="fs-5 fw-bold text-warning" id="piStatSkipped">0</div>
                                 <div class="small text-muted">Bỏ qua</div>
                             </div>
                         </div>
-                        <div class="col-4">
+                        <div class="col-3">
                             <div class="border rounded py-2">
                                 <div class="fs-5 fw-bold text-info" id="piStatBatch">0/0</div>
                                 <div class="small text-muted">Batch</div>
                             </div>
+                        </div>
+                    </div>
+                    <!-- Bảng chi tiết kết quả import -->
+                    <div id="piDetailsWrap" class="d-none mb-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="small fw-semibold text-muted"><i class="bx bx-detail me-1"></i>Chi tiết thay đổi:</span>
+                            <button type="button" class="btn btn-xs btn-outline-secondary" id="piToggleDetails">
+                                <i class="bx bx-show"></i> Hiện
+                            </button>
+                        </div>
+                        <div id="piDetailsBody" class="d-none mt-1" style="max-height:300px;overflow-y:auto;">
+                            <table class="table table-sm table-bordered small mb-0" style="font-size:0.8rem;">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>DVT</th>
+                                        <th>Giá cũ</th>
+                                        <th>Giá mới</th>
+                                        <th>Trạng thái</th>
+                                        <th>Ghi chú</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="piDetailsBodyContent"></tbody>
+                            </table>
                         </div>
                     </div>
                     <div id="piErrorsWrap" class="d-none">
