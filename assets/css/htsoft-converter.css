@@ -1,41 +1,243 @@
+/* ========================================================================
+   TGS HTSoft Stock Converter - Modern UI (No Tabs)
+   ======================================================================== */
+
 .tgs-htsoft-converter-page {
-    --tgs-accent: #0b7285;
-    --tgs-accent-soft: #e6f7fa;
-    --tgs-surface: #f8fbfc;
+    --tgs-primary: #0ea5e9;
+    --tgs-primary-hover: #0284c7;
+    --tgs-surface: #ffffff;
+    --tgs-bg: #f8fafc;
+    --tgs-border: #e2e8f0;
+    --tgs-text: #1e293b;
+    --tgs-text-muted: #64748b;
+    --tgs-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --tgs-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+    --tgs-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    --tgs-radius: 12px;
+    --tgs-radius-lg: 16px;
 }
 
-.tgs-htsoft-converter-page .alert-info {
-    background: linear-gradient(135deg, #eaf9ff 0%, #f2fff8 100%);
-    color: #0f4c5c;
+/* ── Page Header ──────────────────────────────────────────── */
+.tgs-page-header {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-radius: var(--tgs-radius-lg);
+    padding: 1.5rem;
+    border: 1px solid #bae6fd;
 }
 
-.tgs-htsoft-converter-page .nav-tabs .nav-link {
-    font-weight: 600;
-    color: #435b63;
+.tgs-icon-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--tgs-primary) 0%, var(--tgs-primary-hover) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 24px;
+    box-shadow: var(--tgs-shadow-md);
 }
 
-.tgs-htsoft-converter-page .nav-tabs .nav-link.active {
-    color: var(--tgs-accent);
-    border-color: #d4ebef #d4ebef #fff;
-    background: #fff;
+.tgs-page-header h3 {
+    font-size: 1.5rem;
+    color: var(--tgs-text);
+    margin: 0;
 }
 
-.tgs-htsoft-converter-page .card {
-    border: 1px solid #e3eef1;
+/* ── Content Wrapper ──────────────────────────────────────── */
+.tgs-content-wrapper {
+    padding: 1rem 0;
 }
 
-.tgs-htsoft-converter-page .card-header {
+/* ── Search Panel (Sidebar) ───────────────────────────────── */
+.tgs-search-panel {
     background: var(--tgs-surface);
-    border-bottom: 1px solid #e3eef1;
+    border-radius: var(--tgs-radius);
+    border: 1px solid var(--tgs-border);
+    box-shadow: var(--tgs-shadow-sm);
+    overflow: hidden;
 }
 
+.tgs-panel-header {
+    padding: 1.25rem;
+    background: var(--tgs-bg);
+    border-bottom: 1px solid var(--tgs-border);
+}
+
+.tgs-panel-header h6 {
+    font-size: 0.95rem;
+    color: var(--tgs-text);
+    margin: 0;
+}
+
+.tgs-panel-body {
+    padding: 1.25rem;
+}
+
+/* ── Config Panel (Main) ──────────────────────────────────── */
+.tgs-config-panel {
+    background: var(--tgs-surface);
+    border-radius: var(--tgs-radius);
+    border: 1px solid var(--tgs-border);
+    box-shadow: var(--tgs-shadow-sm);
+    min-height: 600px;
+    display: flex;
+    flex-direction: column;
+}
+
+.tgs-config-panel .tgs-panel-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Empty State ──────────────────────────────────────────── */
+.tgs-empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tgs-empty-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.tgs-empty-icon i {
+    font-size: 2.5rem;
+    color: var(--tgs-primary);
+}
+
+/* ── Product Selected ─────────────────────────────────────── */
+.tgs-product-selected {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-radius: var(--tgs-radius);
+    padding: 1.25rem;
+    border: 1px solid var(--tgs-border);
+}
+
+.tgs-product-avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--tgs-primary) 0%, var(--tgs-primary-hover) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 28px;
+    flex-shrink: 0;
+}
+
+/* ── Config List ──────────────────────────────────────────── */
+.tgs-config-list {
+    padding: 1.25rem;
+    background: var(--tgs-bg);
+    border-radius: var(--tgs-radius);
+}
+
+.tgs-config-cards {
+    display: grid;
+    gap: 0.75rem;
+}
+
+/* ── Form Section ─────────────────────────────────────────── */
+.tgs-form-section {
+    padding: 1.5rem;
+    background: var(--tgs-bg);
+    border-radius: var(--tgs-radius);
+    border: 1px solid var(--tgs-border);
+}
+
+.tgs-form-header {
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--tgs-border);
+}
+
+/* ── Table Section ────────────────────────────────────────── */
+.tgs-table-section {
+    margin-top: 2rem;
+}
+
+.tgs-table-panel {
+    background: var(--tgs-surface);
+    border-radius: var(--tgs-radius);
+    border: 1px solid var(--tgs-border);
+    box-shadow: var(--tgs-shadow);
+    overflow: hidden;
+}
+
+.tgs-table-header {
+    padding: 1.25rem 1.5rem;
+    background: var(--tgs-bg);
+    border-bottom: 1px solid var(--tgs-border);
+}
+
+.tgs-table-search {
+    width: min(100%, 300px);
+}
+
+.tgs-table-body {
+    overflow-x: auto;
+}
+
+.tgs-table-footer {
+    padding: 1rem 1.5rem;
+    background: var(--tgs-bg);
+    border-top: 1px solid var(--tgs-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+/* ── Import Guide ─────────────────────────────────────────── */
+.tgs-import-guide {
+    padding: 1rem 1.5rem;
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-bottom: 1px solid #fbbf24;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tgs-guide-item {
+    display: flex;
+    align-items: start;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.tgs-guide-item i {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+    margin-top: 0.125rem;
+}
+
+.tgs-guide-item strong {
+    color: var(--tgs-text);
+}
+
+.tgs-guide-item .text-muted {
+    color: var(--tgs-text-muted);
+}
+
+/* ── Scanner ──────────────────────────────────────────────── */
 .tgs-scan-preview {
     width: 100%;
     min-height: 220px;
-    border-radius: 12px;
+    border-radius: var(--tgs-radius);
     overflow: hidden;
-    border: 1px dashed #9bc8d1;
-    background: #081c24;
+    border: 2px dashed var(--tgs-border);
+    background: #0f172a;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -48,52 +250,75 @@
     display: block;
 }
 
+/* ── Result List ──────────────────────────────────────────── */
 .tgs-result-list {
-    max-height: 320px;
-    overflow: auto;
-    border: 1px solid #e3eef1;
-    border-radius: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--tgs-border);
+    border-radius: var(--tgs-radius);
+    background: var(--tgs-surface);
 }
 
 .tgs-result-list .list-group-item {
     border-left: 0;
     border-right: 0;
-    border-color: #eef4f6;
+    border-color: var(--tgs-border);
+    padding: 0.875rem 1rem;
+    transition: all 0.2s ease;
 }
 
-.tgs-convert-ratio {
-    display: flex;
-    align-items: end;
-    gap: 10px;
-    border: 1px solid #d8e8ec;
-    border-radius: 12px;
-    padding: 12px;
-    background: #fbfeff;
+.tgs-result-list .list-group-item:hover {
+    background: var(--tgs-bg);
+    cursor: pointer;
 }
 
-.tgs-convert-ratio .ratio-box {
-    flex: 1;
+.tgs-result-list .list-group-item:first-child {
+    border-top: 0;
+    border-top-left-radius: var(--tgs-radius);
+    border-top-right-radius: var(--tgs-radius);
 }
 
-.tgs-convert-ratio .ratio-arrow {
-    height: 38px;
-    width: 38px;
-    border-radius: 999px;
-    background: var(--tgs-accent-soft);
-    color: var(--tgs-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
+.tgs-result-list .list-group-item:last-child {
+    border-bottom: 0;
+    border-bottom-left-radius: var(--tgs-radius);
+    border-bottom-right-radius: var(--tgs-radius);
 }
 
-.tgs-map-search {
-    width: min(100%, 340px);
+/* ── Table Styling ────────────────────────────────────────── */
+#mappingTable {
+    margin: 0;
 }
 
-#mappingTable td,
+#mappingTable thead {
+    background: var(--tgs-bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
 #mappingTable th {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--tgs-text);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    padding: 0.875rem 1rem;
+    border-bottom: 2px solid var(--tgs-border);
+}
+
+#mappingTable td {
+    padding: 0.875rem 1rem;
     vertical-align: middle;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--tgs-border);
+}
+
+#mappingTable tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+#mappingTable tbody tr:hover {
+    background: var(--tgs-bg);
 }
 
 .tgs-note-cell {
@@ -101,108 +326,200 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    line-height: 1.35;
-    max-width: 320px;
+    line-height: 1.4;
+    max-width: 280px;
+    color: var(--tgs-text-muted);
+    font-size: 0.85rem;
 }
 
-.tgs-qty-logs {
-    white-space: nowrap;
+/* ── Form Controls ────────────────────────────────────────── */
+.tgs-htsoft-converter-page .form-control {
+    border-radius: 8px;
+    border: 1px solid var(--tgs-border);
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
 }
 
-#tableHtsoftToTgs td,
-#tableTgsToHtsoft td {
-    vertical-align: middle;
+.tgs-htsoft-converter-page .form-control:focus {
+    border-color: var(--tgs-primary);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.tgs-htsoft-converter-page .form-label {
+    font-size: 0.875rem;
+    color: var(--tgs-text);
+    margin-bottom: 0.5rem;
 }
 
 .tgs-htsoft-converter-page .form-text {
-    font-size: 0.78rem;
+    font-size: 0.8rem;
+    color: var(--tgs-text-muted);
+    margin-top: 0.375rem;
 }
 
+/* ── Buttons ──────────────────────────────────────────────── */
+.tgs-htsoft-converter-page .btn {
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    padding: 0.625rem 1.25rem;
+    transition: all 0.2s ease;
+}
+
+.tgs-htsoft-converter-page .btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+}
+
+.tgs-htsoft-converter-page .btn-primary {
+    background: linear-gradient(135deg, var(--tgs-primary) 0%, var(--tgs-primary-hover) 100%);
+    border: none;
+    box-shadow: var(--tgs-shadow);
+}
+
+.tgs-htsoft-converter-page .btn-primary:hover {
+    background: linear-gradient(135deg, var(--tgs-primary-hover) 0%, #0369a1 100%);
+    box-shadow: var(--tgs-shadow-md);
+    transform: translateY(-1px);
+}
+
+.tgs-htsoft-converter-page .btn-light {
+    background: var(--tgs-bg);
+    border: 1px solid var(--tgs-border);
+    color: var(--tgs-text);
+}
+
+.tgs-htsoft-converter-page .btn-light:hover {
+    background: var(--tgs-surface);
+    border-color: var(--tgs-primary);
+}
+
+/* ── Badges ───────────────────────────────────────────────── */
+.tgs-htsoft-converter-page .badge {
+    border-radius: 6px;
+    padding: 0.375rem 0.75rem;
+    font-weight: 500;
+    font-size: 0.8rem;
+}
+
+/* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 991.98px) {
-    .tgs-htsoft-converter-page h4 {
-        font-size: 1.05rem;
+    .tgs-page-header h3 {
+        font-size: 1.25rem;
     }
 
-    .tgs-htsoft-converter-page .nav-tabs .nav-link {
-        font-size: 0.88rem;
-        padding: 0.65rem 0.7rem;
+    .tgs-icon-badge {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
     }
 
-    .tgs-convert-ratio {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .tgs-convert-ratio .ratio-arrow {
-        align-self: center;
-        transform: rotate(90deg);
-    }
-
-    .tgs-map-search {
+    .tgs-table-search {
         width: 100%;
     }
 
-    #mappingTable,
-    #tableHtsoftToTgs,
-    #tableTgsToHtsoft {
+    .tgs-import-guide {
+        font-size: 0.8rem;
+    }
+
+    #mappingTable {
         font-size: 0.85rem;
     }
 
-    #mappingTable th:nth-child(6),
-    #mappingTable td:nth-child(6) {
-        min-width: 170px;
+    #mappingTable th,
+    #mappingTable td {
+        padding: 0.75rem 0.875rem;
     }
 }
 
-@media (max-width: 576px) {
-    .tgs-htsoft-converter-page .btn {
-        font-size: 0.82rem;
+@media (max-width: 767.98px) {
+    .tgs-page-header {
+        padding: 1.25rem;
+    }
+
+    .tgs-panel-body,
+    .tgs-panel-header {
+        padding: 1rem;
+    }
+
+    .tgs-table-header,
+    .tgs-table-footer {
+        padding: 1rem;
+    }
+
+    .tgs-form-section {
+        padding: 1.25rem;
+    }
+
+    .tgs-product-avatar {
+        width: 48px;
+        height: 48px;
+        font-size: 24px;
     }
 
     .tgs-scan-preview {
         min-height: 180px;
     }
+}
 
-    .tgs-htsoft-converter-page .table-responsive {
+@media (max-width: 576px) {
+    .tgs-page-header h3 {
+        font-size: 1.1rem;
+    }
+
+    .tgs-htsoft-converter-page .btn {
+        font-size: 0.85rem;
+        padding: 0.5rem 1rem;
+    }
+
+    .tgs-htsoft-converter-page .btn-sm {
+        font-size: 0.8rem;
+        padding: 0.375rem 0.75rem;
+    }
+
+    #mappingTable {
+        font-size: 0.8rem;
+    }
+
+    .tgs-table-body {
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
 }
 
-
-/* ── v2: Multi-DVT additions ───────────────────────────────────── */
-.tgs-tab-disabled {
-    opacity: 0.55;
-    pointer-events: none !important;
-    cursor: not-allowed;
-}
-
-.tgs-selected-product-info {
-    background: var(--bs-light, #f8f9fa);
-    border-radius: 8px;
-    padding: 10px 14px;
-}
-
-.tgs-config-table {
-    font-size: 0.875rem;
-}
-
-.tgs-config-table td {
-    vertical-align: middle;
-}
-
+/* ── Utilities ────────────────────────────────────────────── */
 .btn-xs {
-    padding: 0.15rem 0.4rem;
+    padding: 0.25rem 0.5rem;
     font-size: 0.75rem;
-    line-height: 1.4;
+    line-height: 1.3;
+    border-radius: 4px;
 }
 
 #cfgSearchResults .tgs-product-result {
     border-left: none;
     border-right: none;
     border-radius: 0;
-    padding: 0.45rem 0.75rem;
 }
 
 #cfgSearchResults .tgs-product-result:first-child {
     border-top: none;
+}
+
+/* ── Animation ────────────────────────────────────────────── */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tgs-config-panel,
+.tgs-search-panel,
+.tgs-table-panel {
+    animation: fadeIn 0.3s ease;
 }

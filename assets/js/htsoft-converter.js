@@ -1,7 +1,6 @@
 ﻿/**
- * htsoft-converter.js  — v2
- * Tab 1: Multi-DVT config per SKU
- * Tab 2 & 3: Disabled (kept in HTML but non-functional)
+ * htsoft-converter.js  — v3 Modern UI (No Tabs)
+ * Single page interface for multi-DVT config per SKU
  */
 (function () {
     'use strict';
@@ -130,22 +129,24 @@
     function renderSearchResults(products) {
         if (!dom.cfgSearchResults) return;
         if (!products.length) {
-            dom.cfgSearchResults.innerHTML = '<div class="text-muted small p-2">Khong tim thay san pham.</div>';
+            dom.cfgSearchResults.innerHTML = '<div class="text-muted small text-center py-3">Không tìm thấy sản phẩm</div>';
             return;
         }
         var html = '<div class="list-group list-group-flush">';
         products.forEach(function (p) {
             var count = parseInt(p.config_count || 0, 10);
             var badge = count > 0
-                ? '<span class="badge bg-label-primary ms-1" title="' + count + ' cau hinh DVT">' + count + '</span>'
-                : '<span class="badge bg-label-secondary ms-1">0</span>';
-            html += '<button type="button" class="list-group-item list-group-item-action tgs-product-result"' +
+                ? '<span class="badge bg-primary rounded-pill ms-auto">' + count + '</span>'
+                : '<span class="badge bg-secondary rounded-pill ms-auto">0</span>';
+            html += '<button type="button" class="list-group-item list-group-item-action tgs-product-result d-flex align-items-center"' +
                 ' data-sku="' + escHtml(p.local_product_sku) + '"' +
                 ' data-name="' + escHtml(p.local_product_name) + '"' +
                 ' data-unit="' + escHtml(p.local_product_unit || '') + '"' +
                 ' data-count="' + count + '">' +
-                '<span class="fw-semibold">' + escHtml(p.local_product_sku) + '</span> ' + badge + '<br>' +
-                '<span class="text-muted small">' + escHtml(p.local_product_name) + '</span>' +
+                '<div class="flex-grow-1">' +
+                '<div class="fw-semibold text-dark">' + escHtml(p.local_product_name) + '</div>' +
+                '<div class="small text-muted"><i class="bx bx-barcode me-1"></i>' + escHtml(p.local_product_sku) + '</div>' +
+                '</div>' + badge +
                 '</button>';
         });
         html += '</div>';
@@ -204,34 +205,35 @@
         if (dom.cfgCountBadge) dom.cfgCountBadge.textContent = configs.length;
 
         if (!configs.length) {
-            dom.cfgExistingConfigs.innerHTML = '<div class="text-muted small fst-italic">Chua co cau hinh DVT nao.</div>';
+            dom.cfgExistingConfigs.innerHTML = '<div class="text-center py-3 text-muted small">Chưa có cấu hình đơn vị nào</div>';
             return;
         }
 
-        var html = '<table class="table table-sm tgs-config-table mb-0"><thead><tr>' +
-            '<th>Don vi tinh</th><th>Ty le</th><th>Gia ban</th><th>Kg/1 DVT</th><th>Ghi chu</th><th></th>' +
+        var html = '<div class="table-responsive"><table class="table table-sm tgs-config-table mb-0">' +
+            '<thead class="table-light"><tr>' +
+            '<th>Đơn vị tính</th><th>Tỷ lệ</th><th>Giá bán</th><th>Khối lượng</th><th style="width:80px;"></th>' +
             '</tr></thead><tbody>';
         configs.forEach(function (c) {
             var priceCell = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '')
-                ? '<span class="text-success">' + formatPrice(parseFloat(c.unit_price)) + '</span>'
-                : '<em class="text-muted">—</em>';
+                ? '<span class="text-success fw-semibold">' + formatPrice(parseFloat(c.unit_price)) + ' ₫</span>'
+                : '<span class="text-muted">—</span>';
             var weightCell = (c.unit_weight_kg !== null && c.unit_weight_kg !== undefined && c.unit_weight_kg !== '')
                 ? '<span class="text-info">' + formatWeight(parseFloat(c.unit_weight_kg)) + ' kg</span>'
-                : '<em class="text-muted">—</em>';
+                : '<span class="text-muted">—</span>';
+            var unitDisplay = c.convert_unit ? '<strong>' + escHtml(c.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
             html += '<tr>' +
-                '<td>' + (c.convert_unit ? escHtml(c.convert_unit) : '<em class="text-muted">mac dinh</em>') + '</td>' +
-                '<td>' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
+                '<td>' + unitDisplay + '<br><small class="text-muted">' + escHtml(c.convert_note || '') + '</small></td>' +
+                '<td class="fw-semibold text-primary">× ' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
                 '<td>' + priceCell + '</td>' +
                 '<td>' + weightCell + '</td>' +
-                '<td class="text-muted small">' + escHtml(c.convert_note || '') + '</td>' +
                 '<td class="text-end text-nowrap">' +
-                '<button class="btn btn-xs btn-outline-primary me-1" data-cfg-edit="' + c.global_htsoft_stock_convert_id + '">' +
+                '<button class="btn btn-xs btn-light me-1" data-cfg-edit="' + c.global_htsoft_stock_convert_id + '" title="Chỉnh sửa">' +
                 '<i class="bx bx-edit-alt"></i></button>' +
-                '<button class="btn btn-xs btn-outline-danger" data-cfg-delete="' + c.global_htsoft_stock_convert_id + '" data-cfg-unit="' + escHtml(c.convert_unit || '') + '">' +
+                '<button class="btn btn-xs btn-outline-danger" data-cfg-delete="' + c.global_htsoft_stock_convert_id + '" data-cfg-unit="' + escHtml(c.convert_unit || '') + '" title="Xóa">' +
                 '<i class="bx bx-trash"></i></button>' +
                 '</td></tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         dom.cfgExistingConfigs.innerHTML = html;
 
         dom.cfgExistingConfigs.querySelectorAll('[data-cfg-edit]').forEach(function (btn) {
@@ -262,8 +264,14 @@
         if (dom.cfgNote)            dom.cfgNote.value             = c.convert_note || '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '') ? c.unit_price : '';
         if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = (c.unit_weight_kg !== null && c.unit_weight_kg !== undefined && c.unit_weight_kg !== '') ? c.unit_weight_kg : '';
-        if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Chỉnh sửa';
-        if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-edit-alt me-1 text-warning"></i>Chỉnh sửa DVT: ' + escHtml(c.convert_unit || 'mặc định');
+        if (dom.cfgFormMode) {
+            dom.cfgFormMode.textContent = 'Chỉnh sửa';
+            dom.cfgFormMode.style.display = '';
+            dom.cfgFormMode.className = 'badge bg-warning';
+        }
+        if (dom.cfgEditTitle) {
+            dom.cfgEditTitle.innerHTML = '<i class="bx bx-edit-alt me-1"></i>Chỉnh sửa: ' + escHtml(c.convert_unit || 'Mặc định');
+        }
         updateRatioPreview();
         if (dom.cfgConvertUnit) dom.cfgConvertUnit.focus();
     }
@@ -274,12 +282,18 @@
     function resetUnitForm() {
         if (dom.cfgMappingId)       dom.cfgMappingId.value       = '0';
         if (dom.cfgConvertUnit)     dom.cfgConvertUnit.value      = '';
-        if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = '';
+        if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.value  = '1';
         if (dom.cfgNote)            dom.cfgNote.value             = '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = '';
         if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = '';
-        if (dom.cfgFormMode)        dom.cfgFormMode.textContent   = 'Thêm mới';
-        if (dom.cfgEditTitle)       dom.cfgEditTitle.innerHTML     = '<i class="bx bx-plus-circle me-1 text-primary"></i>Thêm cấu hình DVT mới';
+        if (dom.cfgFormMode) {
+            dom.cfgFormMode.textContent = 'Thêm mới';
+            dom.cfgFormMode.style.display = 'none';
+            dom.cfgFormMode.className = 'badge bg-primary';
+        }
+        if (dom.cfgEditTitle) {
+            dom.cfgEditTitle.innerHTML = '<i class="bx bx-plus-circle me-1"></i>Thêm đơn vị tính mới';
+        }
         updateRatioPreview();
     }
 
@@ -288,10 +302,10 @@
         var unit  = (dom.cfgConvertUnit  ? dom.cfgConvertUnit.value  : '').trim();
         var ratio = parseFloat((dom.cfgConvertToHtsoft ? dom.cfgConvertToHtsoft.value : '').replace(',', '.')) || 0;
         if (ratio > 0) {
-            var unitLabel = unit || 'don vi';
-            dom.cfgRatioPreview.textContent = '1 ' + unitLabel + ' = ' + formatRatio(ratio) + ' don vi nho nhat';
+            var unitLabel = unit || 'đơn vị';
+            dom.cfgRatioPreview.textContent = '1 ' + unitLabel + ' = ' + formatRatio(ratio) + ' đơn vị nhỏ nhất';
         } else {
-            dom.cfgRatioPreview.textContent = '';
+            dom.cfgRatioPreview.textContent = '1 DVT = 1 đơn vị';
         }
     }
 
@@ -429,29 +443,30 @@
     function renderMappingsTable(rows) {
         if (!dom.mappingTableBody) return;
         if (!rows.length) {
-            dom.mappingTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Khong co du lieu</td></tr>';
+            dom.mappingTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Không có dữ liệu</td></tr>';
             return;
         }
         var html = '';
         rows.forEach(function (r) {
             var priceCell = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '')
-                ? '<span class="text-success fw-semibold">' + formatPrice(parseFloat(r.unit_price)) + '</span>'
-                : '<em class="text-muted small">—</em>';
+                ? '<span class="text-success fw-semibold">' + formatPrice(parseFloat(r.unit_price)) + ' ₫</span>'
+                : '<span class="text-muted">—</span>';
             var weightCell = (r.unit_weight_kg !== null && r.unit_weight_kg !== undefined && r.unit_weight_kg !== '')
-                ? '<span class="text-info fw-semibold">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
-                : '<em class="text-muted small">—</em>';
+                ? '<span class="text-info">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
+                : '<span class="text-muted">—</span>';
+            var unitDisplay = r.convert_unit ? '<strong>' + escHtml(r.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
             html += '<tr>' +
-                '<td><code>' + escHtml(r.global_product_sku) + '</code></td>' +
+                '<td><code class="text-primary">' + escHtml(r.global_product_sku) + '</code></td>' +
                 '<td>' + escHtml(r.local_product_name || '') + '</td>' +
-                '<td>' + (r.convert_unit ? escHtml(r.convert_unit) : '<em class="text-muted">mac dinh</em>') + '</td>' +
-                '<td>' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</td>' +
+                '<td>' + unitDisplay + '</td>' +
+                '<td><span class="badge bg-light text-dark">× ' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</span></td>' +
                 '<td>' + priceCell + '</td>' +
                 '<td>' + weightCell + '</td>' +
-                '<td class="text-muted small">' + escHtml(r.convert_note || '') + '</td>' +
+                '<td><div class="tgs-note-cell">' + escHtml(r.convert_note || '') + '</div></td>' +
                 '<td class="text-nowrap">' +
-                '<button class="btn btn-xs btn-outline-primary me-1" data-tbl-edit="' + r.global_htsoft_stock_convert_id + '">' +
+                '<button class="btn btn-xs btn-light me-1" data-tbl-edit="' + r.global_htsoft_stock_convert_id + '" title="Chỉnh sửa">' +
                 '<i class="bx bx-edit-alt"></i></button>' +
-                '<button class="btn btn-xs btn-outline-danger" data-tbl-delete="' + r.global_htsoft_stock_convert_id + '" data-tbl-unit="' + escHtml(r.convert_unit || '') + '">' +
+                '<button class="btn btn-xs btn-outline-danger" data-tbl-delete="' + r.global_htsoft_stock_convert_id + '" data-tbl-unit="' + escHtml(r.convert_unit || '') + '" title="Xóa">' +
                 '<i class="bx bx-trash"></i></button>' +
                 '</td></tr>';
         });
