@@ -252,6 +252,18 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     </div>
                 </div>
 
+                <!-- Thông báo dữ liệu đã thay đổi (không tự động tải lại để tránh nặng) -->
+                <div id="mappingStaleNotice" class="alert alert-warning py-2 px-3 mb-0 d-none
+                            d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <span class="small">
+                        <i class="bx bx-info-circle me-1"></i>
+                        Dữ liệu vừa thay đổi. Bảng bên dưới chưa được cập nhật.
+                    </span>
+                    <button type="button" class="btn btn-sm btn-warning" id="btnReloadStale">
+                        <i class="bx bx-refresh me-1"></i>Tải lại bảng
+                    </button>
+                </div>
+
                 <div class="tgs-table-body">
                     <div class="table-responsive">
                         <table class="table table-hover mb-0" id="mappingTable">
@@ -272,8 +284,15 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     </div>
                 </div>
                 <div class="tgs-table-footer">
-                    <div class="text-muted small" id="mappingTableFooter"></div>
-                    <nav id="mappingPagination"></nav>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <div class="text-muted small" id="mappingTableFooter"></div>
+                        <select class="form-select form-select-sm" id="mappingPerPage" style="width:auto;">
+                            <option value="50" selected>50 dòng/trang</option>
+                            <option value="100">100 dòng/trang</option>
+                            <option value="200">200 dòng/trang</option>
+                        </select>
+                    </div>
+                    <nav id="mappingPagination" class="d-flex align-items-center gap-1 flex-wrap"></nav>
                 </div>
             </div>
         </div><!-- /.tgs-table-section -->

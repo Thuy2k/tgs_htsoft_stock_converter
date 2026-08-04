@@ -16,10 +16,15 @@
         searchTimer:        null,
         mappingSearchTimer: null,
         selectedProduct:    null,
-        mappingPage:        1,
-        mappingPerPage:     100,
-        mappingTotal:       0,
-        mappingShowAll:     false,
+
+        // ── Bảng tổng: phân trang phía server ──────────────────────────
+        mappingPage:       1,
+        mappingPerPage:    50,
+        mappingTotal:      0,
+        mappingTotalPages: 0,
+        mappingLoaded:     false,   // đã tải lần nào chưa
+        mappingLoading:    false,   // đang có request chạy → chặn request chồng
+        mappingRows:       [],      // dữ liệu trang hiện tại (cho nút Sửa)
     };
 
     /* =========================================================================
@@ -30,6 +35,7 @@
     const dom = {
         cfgSearchKeyword:      el('cfgSearchKeyword'),
         cfgSearchResults:      el('cfgSearchResults'),
+        btnCfgSearch:          el('btnCfgSearch'),
         btnOpenScanner:        el('btnOpenScanner'),
         btnCloseScanner:       el('btnCloseScanner'),
         scannerWrap:           el('scannerWrap'),
@@ -61,6 +67,9 @@
         mappingTableBody:      el('mappingTableBody'),
         mappingTableFooter:    el('mappingTableFooter'),
         mappingPagination:     el('mappingPagination'),
+        mappingPerPage:        el('mappingPerPage'),
+        mappingStaleNotice:    el('mappingStaleNotice'),
+        btnReloadStale:        el('btnReloadStale'),
         btnRefreshConfigs:     el('btnRefreshConfigs'),
 
         btnImportExcel:        el('btnImportExcel'),
@@ -356,7 +365,8 @@
                 toast(res.data.message || 'Da luu.', 'success');
                 resetUnitForm();
                 loadConfigsForSku(sku);
-                loadMappings(1);
+                // KHÔNG tự tải lại bảng tổng (rất nặng). Chỉ báo dữ liệu đã đổi.
+                markMappingsStale();
             } else {
                 toast((res.data && res.data.message) || 'Loi luu cau hinh.', 'error');
             }
@@ -374,7 +384,8 @@
                     toast((res.data && res.data.message) || 'Da xoa.', 'success');
                     var sku = dom.cfgSku ? dom.cfgSku.value : '';
                     if (sku) loadConfigsForSku(sku);
-                    loadMappings(1);
+                    // Gỡ dòng khỏi bảng đang xem, không gọi lại toàn bộ danh sách.
+                    removeMappingRowFromTable(id);
                 } else {
                     toast((res.data && res.data.message) || 'Loi xoa.', 'error');
                 }
@@ -385,9 +396,19 @@
     /* =========================================================================
      * Mapping Table (bottom, all configs)
      * ====================================================================== */
-    function loadMappings() {
-        var kw      = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim();
-        var sendAll = state.mappingShowAll || kw !== '';
+    /**
+     * Tải MỘT TRANG dữ liệu. Không bao giờ tải toàn bộ bảng.
+     * @param {number} page trang cần tải (1-based)
+     */
+    function loadMappings(page) {
+        if (state.mappingLoading) return;   // chặn request chồng nhau
+
+        var kw = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim();
+        var p  = parseInt(page, 10);
+        if (!p || p < 1) p = 1;
+
+        state.mappingLoading = true;
+        hideStaleNotice();
 
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
@@ -397,18 +418,22 @@
 
         postAjax('tgs_htsoft_converter_list_mappings', {
             keyword:  kw,
-            show_all: sendAll ? 1 : 0,
+            page:     p,
+            per_page: state.mappingPerPage,
         })
             .then(function (res) {
                 if (res.success) {
-                    var mappings = res.data.mappings || [];
-                    var hasMore  = !!res.data.has_more;
-                    state.mappingTotal = mappings.length;
-                    renderMappingsTable(mappings);
-                    renderMappingsPagination(hasMore);
-                    if (dom.mappingTableFooter) {
-                        dom.mappingTableFooter.textContent = mappings.length + ' cấu hình';
-                    }
+                    var d = res.data || {};
+                    state.mappingRows       = d.mappings || [];
+                    state.mappingTotal      = parseInt(d.total, 10) || 0;
+                    state.mappingPage       = parseInt(d.page, 10) || 1;
+                    state.mappingPerPage    = parseInt(d.per_page, 10) || state.mappingPerPage;
+                    state.mappingTotalPages = parseInt(d.total_pages, 10) || 1;
+                    state.mappingLoaded     = true;
+
+                    renderMappingsTable(state.mappingRows);
+                    renderMappingsPagination();
+                    renderMappingsFooter();
                 } else {
                     if (dom.mappingTableBody) {
                         dom.mappingTableBody.innerHTML =
@@ -421,23 +446,96 @@
                     dom.mappingTableBody.innerHTML =
                         '<tr><td colspan="8" class="text-center text-danger">Lỗi kết nối.</td></tr>';
                 }
-            });
+            })
+            .finally(function () { state.mappingLoading = false; });
     }
 
-    function renderMappingsPagination(hasMore) {
-        if (!dom.mappingPagination) return;
-        dom.mappingPagination.innerHTML = '';
-        if (!hasMore) return;
+    function renderMappingsFooter() {
+        if (!dom.mappingTableFooter) return;
+        if (!state.mappingLoaded) { dom.mappingTableFooter.textContent = ''; return; }
+        if (!state.mappingTotal) { dom.mappingTableFooter.textContent = '0 cấu hình'; return; }
 
+        var from = (state.mappingPage - 1) * state.mappingPerPage + 1;
+        var to   = Math.min(from + state.mappingRows.length - 1, state.mappingTotal);
+        dom.mappingTableFooter.textContent =
+            from + '–' + to + ' / ' + state.mappingTotal.toLocaleString('vi-VN') + ' cấu hình'
+            + ' · Trang ' + state.mappingPage + '/' + state.mappingTotalPages;
+    }
+
+    function pagerButton(label, page, opts) {
+        opts = opts || {};
         var btn = document.createElement('button');
         btn.type      = 'button';
-        btn.className = 'btn btn-sm btn-outline-primary';
-        btn.innerHTML = '<i class="bx bx-list-ul me-1"></i>Xem tất cả';
-        btn.addEventListener('click', function () {
-            state.mappingShowAll = true;
-            loadMappings();
+        btn.className = 'btn btn-sm ' + (opts.active ? 'btn-primary' : 'btn-outline-secondary');
+        btn.innerHTML = label;
+        if (opts.disabled) {
+            btn.disabled = true;
+        } else {
+            btn.addEventListener('click', function () { loadMappings(page); });
+        }
+        return btn;
+    }
+
+    function renderMappingsPagination() {
+        if (!dom.mappingPagination) return;
+        dom.mappingPagination.innerHTML = '';
+
+        // Chưa tải lần nào → chỉ hiện 1 nút bấm để tải trang đầu
+        if (!state.mappingLoaded) {
+            var start = document.createElement('button');
+            start.type      = 'button';
+            start.className = 'btn btn-sm btn-outline-primary';
+            start.innerHTML = '<i class="bx bx-list-ul me-1"></i>Xem tất cả';
+            start.addEventListener('click', function () { loadMappings(1); });
+            dom.mappingPagination.appendChild(start);
+            return;
+        }
+
+        if (state.mappingTotalPages <= 1) return;
+
+        var cur   = state.mappingPage;
+        var last  = state.mappingTotalPages;
+        var frag  = document.createDocumentFragment();
+
+        frag.appendChild(pagerButton('<i class="bx bx-chevrons-left"></i>', 1, { disabled: cur <= 1 }));
+        frag.appendChild(pagerButton('<i class="bx bx-chevron-left"></i>', cur - 1, { disabled: cur <= 1 }));
+
+        // Cửa sổ tối đa 5 số trang quanh trang hiện tại
+        var from = Math.max(1, cur - 2);
+        var to   = Math.min(last, from + 4);
+        from     = Math.max(1, to - 4);
+        for (var i = from; i <= to; i++) {
+            frag.appendChild(pagerButton(String(i), i, { active: i === cur }));
+        }
+
+        frag.appendChild(pagerButton('<i class="bx bx-chevron-right"></i>', cur + 1, { disabled: cur >= last }));
+        frag.appendChild(pagerButton('<i class="bx bx-chevrons-right"></i>', last, { disabled: cur >= last }));
+
+        dom.mappingPagination.appendChild(frag);
+    }
+
+    /* ── Thông báo "dữ liệu đã đổi" thay cho việc tự động tải lại ───────── */
+    function markMappingsStale() {
+        if (!state.mappingLoaded) return;          // chưa tải thì không cần nhắc
+        if (!dom.mappingStaleNotice) return;
+        dom.mappingStaleNotice.classList.remove('d-none');
+    }
+
+    function hideStaleNotice() {
+        if (dom.mappingStaleNotice) dom.mappingStaleNotice.classList.add('d-none');
+    }
+
+    /** Xoá 1 dòng khỏi bảng đang hiển thị mà không phải gọi lại server */
+    function removeMappingRowFromTable(id) {
+        if (!dom.mappingTableBody) return;
+        var tr = dom.mappingTableBody.querySelector('tr[data-row-id="' + id + '"]');
+        if (!tr) return;
+        tr.remove();
+        state.mappingRows = state.mappingRows.filter(function (r) {
+            return parseInt(r.global_htsoft_stock_convert_id, 10) !== id;
         });
-        dom.mappingPagination.appendChild(btn);
+        if (state.mappingTotal > 0) state.mappingTotal--;
+        renderMappingsFooter();
     }
 
     function renderMappingsTable(rows) {
@@ -455,7 +553,7 @@
                 ? '<span class="text-info">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
                 : '<span class="text-muted">—</span>';
             var unitDisplay = r.convert_unit ? '<strong>' + escHtml(r.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
-            html += '<tr>' +
+            html += '<tr data-row-id="' + r.global_htsoft_stock_convert_id + '">' +
                 '<td><code class="text-primary">' + escHtml(r.global_product_sku) + '</code></td>' +
                 '<td>' + escHtml(r.local_product_name || '') + '</td>' +
                 '<td>' + unitDisplay + '</td>' +
@@ -470,21 +568,47 @@
                 '<i class="bx bx-trash"></i></button>' +
                 '</td></tr>';
         });
+        // Gán HTML 1 lần. Sự kiện dùng event delegation (bind 1 lần ở init)
+        // → không tạo hàng nghìn listener cho mỗi lần render.
         dom.mappingTableBody.innerHTML = html;
+    }
 
-        dom.mappingTableBody.querySelectorAll('[data-tbl-edit]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                editMappingFromTable(parseInt(btn.dataset.tblEdit, 10));
-            });
-        });
-        dom.mappingTableBody.querySelectorAll('[data-tbl-delete]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                deleteMappingFromTable(parseInt(btn.dataset.tblDelete, 10), btn.dataset.tblUnit);
-            });
+    function bindMappingTableDelegation() {
+        if (!dom.mappingTableBody) return;
+        dom.mappingTableBody.addEventListener('click', function (e) {
+            var editBtn = e.target.closest ? e.target.closest('[data-tbl-edit]') : null;
+            if (editBtn) {
+                editMappingFromTable(parseInt(editBtn.dataset.tblEdit, 10));
+                return;
+            }
+            var delBtn = e.target.closest ? e.target.closest('[data-tbl-delete]') : null;
+            if (delBtn) {
+                deleteMappingFromTable(parseInt(delBtn.dataset.tblDelete, 10), delBtn.dataset.tblUnit);
+            }
         });
     }
 
     function editMappingFromTable(id) {
+        // Dữ liệu trang hiện tại đã có sẵn → không cần gọi server lại
+        var cached = null;
+        for (var i = 0; i < state.mappingRows.length; i++) {
+            if (parseInt(state.mappingRows[i].global_htsoft_stock_convert_id, 10) === id) {
+                cached = state.mappingRows[i];
+                break;
+            }
+        }
+        if (cached) {
+            selectProduct({
+                local_product_sku:  cached.global_product_sku,
+                local_product_name: cached.local_product_name || cached.global_product_sku,
+                local_product_unit: cached.local_product_unit || '',
+                config_count:       0,
+            });
+            setTimeout(function () { editConfig(cached); }, 150);
+            if (dom.cfgContent) dom.cfgContent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
         postAjax('tgs_htsoft_converter_get_mapping', { id: id })
             .then(function (res) {
                 if (!res.success || !res.data.mapping) {
@@ -793,7 +917,8 @@
                 }
             }
 
-            loadMappings(1);
+            // Không tự tải lại bảng tổng sau khi import (dữ liệu lớn → treo trình duyệt).
+            markMappingsStale();
         });
     }
 
@@ -917,7 +1042,8 @@
             _piState.stopped = true;
             d.stopBtn.disabled = true;
         };
-        d.closeBtn.onclick = function () { getPiModal().hide(); loadMappings(1); };
+        // Đóng modal: chỉ báo dữ liệu đã đổi, không tự tải lại bảng tổng.
+        d.closeBtn.onclick = function () { getPiModal().hide(); markMappingsStale(); };
 
         getPiModal().show();
         runPriceImport(fileName, rows, d);
@@ -1151,6 +1277,11 @@
             });
         }
 
+        if (dom.btnCfgSearch) dom.btnCfgSearch.addEventListener('click', function () {
+            clearTimeout(state.searchTimer);
+            searchProducts();
+        });
+
         if (dom.cfgConvertUnit)     dom.cfgConvertUnit.addEventListener('input', updateRatioPreview);
         if (dom.cfgConvertToHtsoft) dom.cfgConvertToHtsoft.addEventListener('input', updateRatioPreview);
 
@@ -1161,16 +1292,32 @@
             if (sku) loadConfigsForSku(sku);
         });
 
-        if (dom.btnReloadMappings) dom.btnReloadMappings.addEventListener('click', function () { loadMappings(1); });
+        if (dom.btnReloadMappings) dom.btnReloadMappings.addEventListener('click', function () {
+            loadMappings(state.mappingLoaded ? state.mappingPage : 1);
+        });
+        if (dom.btnReloadStale) dom.btnReloadStale.addEventListener('click', function () {
+            loadMappings(state.mappingPage);
+        });
+        if (dom.mappingPerPage) {
+            dom.mappingPerPage.addEventListener('change', function () {
+                state.mappingPerPage = parseInt(dom.mappingPerPage.value, 10) || 50;
+                if (state.mappingLoaded) loadMappings(1);
+            });
+        }
         if (dom.mappingKeyword) {
             dom.mappingKeyword.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') loadMappings(1);
+                if (e.key === 'Enter') { clearTimeout(state.mappingSearchTimer); loadMappings(1); }
             });
             dom.mappingKeyword.addEventListener('input', function () {
                 clearTimeout(state.mappingSearchTimer);
+                var kw = dom.mappingKeyword.value.trim();
+                // Chưa tải bảng lần nào + ô tìm kiếm trống → không tự động gọi server.
+                if (!state.mappingLoaded && kw === '') return;
                 state.mappingSearchTimer = setTimeout(function () { loadMappings(1); }, 500);
             });
         }
+
+        bindMappingTableDelegation();
 
         if (dom.btnExportExcel)   dom.btnExportExcel.addEventListener('click', exportExcel);
         if (dom.btnImportExcel)   dom.btnImportExcel.addEventListener('click', function () {
@@ -1196,14 +1343,19 @@
     function init() {
         bindEvents();
         initScanner();
+
+        if (dom.mappingPerPage) {
+            state.mappingPerPage = parseInt(dom.mappingPerPage.value, 10) || 50;
+        }
+
         // Không tự load — hiện placeholder, chờ user bấm "Xem tất cả"
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="7" class="text-center text-muted py-4">'
+                '<tr><td colspan="8" class="text-center text-muted py-4">'
                 + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
                 + '</td></tr>';
         }
-        renderMappingsPagination(true);
+        renderMappingsPagination();
     }
 
     if (document.readyState === 'loading') {

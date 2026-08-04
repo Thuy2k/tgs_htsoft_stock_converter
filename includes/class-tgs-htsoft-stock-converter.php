@@ -528,8 +528,23 @@ class TGS_HTSoft_Stock_Converter
     }
 
     // =========================================================================
-    // AJAX: Danh sách tất cả cấu hình (bảng tổng)
+    // AJAX: Danh sách tất cả cấu hình (bảng tổng) — PHÂN TRANG PHÍA SERVER
+    //
+    // Trước đây: "Xem tất cả" trả về TOÀN BỘ bảng (20k+ dòng) trong 1 request
+    // → MySQL phải join full-table (BINARY chặn index), JSON hàng chục MB,
+    //   trình duyệt dựng 20k <tr> → treo tab + nặng server.
+    //
+    // Nay: luôn LIMIT/OFFSET theo trang (tối đa 200 dòng/trang) và tách join
+    // sản phẩm thành query phụ theo IN(...) → dùng được index uk_global_product_sku.
+    //
+    // POST: keyword, page (1-based), per_page (10..200)
+    // Trả về: mappings, total, page, per_page, total_pages
     // =========================================================================
+
+    const LIST_PER_PAGE_DEFAULT = 50;
+    const LIST_PER_PAGE_MAX     = 200;
+    /** Giới hạn số SKU lấy từ bảng sản phẩm khi tìm theo tên/barcode */
+    const LIST_SEARCH_SKU_CAP   = 2000;
 
     public function ajax_list_mappings()
     {
@@ -539,76 +554,192 @@ class TGS_HTSoft_Stock_Converter
         global $wpdb;
 
         $mapping_table = self::table_mapping();
-        $product_table = self::table_product();
 
-        $keyword  = isset($_POST['keyword'])  ? sanitize_text_field(wp_unslash($_POST['keyword'])) : '';
-        $show_all = !empty($_POST['show_all']);
+        $keyword = isset($_POST['keyword']) ? sanitize_text_field(wp_unslash($_POST['keyword'])) : '';
+
+        $page = isset($_POST['page']) ? (int) $_POST['page'] : 1;
+        if ($page < 1) {
+            $page = 1;
+        }
+
+        $per_page = isset($_POST['per_page']) ? (int) $_POST['per_page'] : self::LIST_PER_PAGE_DEFAULT;
+        if ($per_page < 10) {
+            $per_page = 10;
+        }
+        if ($per_page > self::LIST_PER_PAGE_MAX) {
+            $per_page = self::LIST_PER_PAGE_MAX;
+        }
+
+        // ── Dựng mệnh đề WHERE (chỉ trên bảng mapping, không join) ────────
+        $where  = '(m.is_deleted = 0 OR m.is_deleted IS NULL)';
+        $params = [];
 
         if ($keyword !== '') {
             $like = '%' . $wpdb->esc_like($keyword) . '%';
-            $kw_sql_base = "SELECT
-                    m.global_htsoft_stock_convert_id,
-                    m.global_product_sku,
-                    m.convert_unit,
-                    m.convert_from_tgs,
-                    m.convert_to_htsoft,
-                    m.convert_note,
-                    m.unit_price,
-                    m.unit_weight_kg,
-                    m.updated_at,
-                    p.global_product_name AS local_product_name,
-                    p.global_product_unit AS local_product_unit
-                 FROM {$mapping_table} m
-                 LEFT JOIN {$product_table} p
-                     ON BINARY p.global_product_sku = m.global_product_sku
-                    AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
-                 WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
-                   AND (
-                     m.global_product_sku LIKE %s
-                     OR m.convert_unit LIKE %s
-                     OR p.global_product_name LIKE %s
-                     OR p.global_product_barcode_main LIKE %s
-                   )
-                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
-            $sql = $show_all
-                ? $wpdb->prepare($kw_sql_base, $like, $like, $like, $like)
-                : $wpdb->prepare($kw_sql_base . ' LIMIT 101', $like, $like, $like, $like);
-        } else {
-            $base_sql = "SELECT
-                    m.global_htsoft_stock_convert_id,
-                    m.global_product_sku,
-                    m.convert_unit,
-                    m.convert_from_tgs,
-                    m.convert_to_htsoft,
-                    m.convert_note,
-                    m.unit_price,
-                    m.unit_weight_kg,
-                    m.updated_at,
-                    p.global_product_name AS local_product_name,
-                    p.global_product_unit AS local_product_unit
-                 FROM {$mapping_table} m
-                 LEFT JOIN {$product_table} p
-                     ON BINARY p.global_product_sku = m.global_product_sku
-                    AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
-                 WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
-                 ORDER BY m.global_product_sku ASC, m.convert_unit ASC";
-            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-            $sql = $show_all ? $base_sql : $base_sql . ' LIMIT 101';
+
+            // Tìm SKU khớp tên / barcode ở bảng sản phẩm bằng 1 query riêng,
+            // tránh JOIN toàn bảng với BINARY (không dùng được index).
+            $matched_skus = self::find_skus_by_product_keyword($like);
+
+            $kw_parts = ['m.global_product_sku LIKE %s', 'm.convert_unit LIKE %s'];
+            $params[] = $like;
+            $params[] = $like;
+
+            if (!empty($matched_skus)) {
+                $placeholders = implode(',', array_fill(0, count($matched_skus), '%s'));
+                $kw_parts[]   = "m.global_product_sku IN ({$placeholders})";
+                $params       = array_merge($params, $matched_skus);
+            }
+
+            $where .= ' AND (' . implode(' OR ', $kw_parts) . ')';
         }
 
-        $rows     = $wpdb->get_results($sql, ARRAY_A) ?: [];
-        $has_more = false;
-        if (!$show_all && count($rows) > 100) {
-            $has_more = true;
-            $rows     = array_slice($rows, 0, 100);
+        // ── Đếm tổng ───────────────────────────────────────────────────────
+        $count_sql = "SELECT COUNT(*) FROM {$mapping_table} m WHERE {$where}";
+        if (!empty($params)) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $count_sql = $wpdb->prepare($count_sql, ...$params);
         }
-        $total = count($rows);
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $total = (int) $wpdb->get_var($count_sql);
+
+        $total_pages = ($per_page > 0) ? (int) ceil($total / $per_page) : 1;
+        if ($total_pages < 1) {
+            $total_pages = 1;
+        }
+        if ($page > $total_pages) {
+            $page = $total_pages;
+        }
+        $offset = ($page - 1) * $per_page;
+
+        // ── Lấy 1 trang dữ liệu (ORDER BY dùng được uk_sku_unit) ──────────
+        $rows_sql = "SELECT
+                m.global_htsoft_stock_convert_id,
+                m.global_product_sku,
+                m.convert_unit,
+                m.convert_from_tgs,
+                m.convert_to_htsoft,
+                m.convert_note,
+                m.unit_price,
+                m.unit_weight_kg,
+                m.updated_at
+             FROM {$mapping_table} m
+             WHERE {$where}
+             ORDER BY m.global_product_sku ASC, m.convert_unit ASC
+             LIMIT %d OFFSET %d";
+
+        $row_params   = $params;
+        $row_params[] = $per_page;
+        $row_params[] = $offset;
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $rows = $wpdb->get_results($wpdb->prepare($rows_sql, ...$row_params), ARRAY_A) ?: [];
+
+        // ── Bổ sung tên / DVT gốc cho đúng các SKU trong trang ─────────────
+        $rows = self::attach_product_info($rows);
 
         self::success([
-            'mappings'  => $rows,
-            'total'     => $total,
-            'has_more'  => $has_more,
+            'mappings'    => $rows,
+            'total'       => $total,
+            'page'        => $page,
+            'per_page'    => $per_page,
+            'total_pages' => $total_pages,
         ]);
+    }
+
+    /**
+     * Tìm danh sách SKU theo tên / barcode sản phẩm (dùng cho ô tìm kiếm bảng tổng).
+     * Có LIMIT cứng để không kéo về hàng chục nghìn SKU.
+     *
+     * @param string $like Chuỗi LIKE đã bọc %...%
+     * @return string[]
+     */
+    private static function find_skus_by_product_keyword($like)
+    {
+        global $wpdb;
+
+        $product_table = self::table_product();
+
+        $sql = $wpdb->prepare(
+            "SELECT global_product_sku
+             FROM {$product_table}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+               AND global_product_sku IS NOT NULL
+               AND global_product_sku <> ''
+               AND (
+                 global_product_name LIKE %s
+                 OR global_product_barcode_main LIKE %s
+               )
+             LIMIT %d",
+            $like,
+            $like,
+            self::LIST_SEARCH_SKU_CAP
+        );
+
+        $skus = $wpdb->get_col($sql);
+        return $skus ? array_values(array_unique(array_map('strval', $skus))) : [];
+    }
+
+    /**
+     * Gắn local_product_name / local_product_unit vào các dòng mapping của 1 trang.
+     * Dùng IN(...) trên cột có UNIQUE KEY → nhanh, thay cho LEFT JOIN có BINARY.
+     *
+     * @param array $rows
+     * @return array
+     */
+    private static function attach_product_info($rows)
+    {
+        if (empty($rows)) {
+            return [];
+        }
+
+        global $wpdb;
+
+        $skus = [];
+        foreach ($rows as $row) {
+            $sku = (string) ($row['global_product_sku'] ?? '');
+            if ($sku !== '') {
+                $skus[$sku] = true;
+            }
+        }
+        $skus = array_keys($skus);
+
+        $by_sku       = [];
+        $by_sku_lower = [];
+
+        if (!empty($skus)) {
+            $product_table = self::table_product();
+            $placeholders  = implode(',', array_fill(0, count($skus), '%s'));
+
+            $sql = "SELECT global_product_sku, global_product_name, global_product_unit
+                    FROM {$product_table}
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                      AND global_product_sku IN ({$placeholders})";
+
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $products = $wpdb->get_results($wpdb->prepare($sql, ...$skus), ARRAY_A) ?: [];
+
+            foreach ($products as $p) {
+                $key                = (string) $p['global_product_sku'];
+                $by_sku[$key]       = $p;
+                $by_sku_lower[mb_strtolower($key)] = $p;
+            }
+        }
+
+        foreach ($rows as &$row) {
+            $sku = (string) ($row['global_product_sku'] ?? '');
+            $p   = null;
+            if (isset($by_sku[$sku])) {
+                $p = $by_sku[$sku];
+            } elseif (isset($by_sku_lower[mb_strtolower($sku)])) {
+                $p = $by_sku_lower[mb_strtolower($sku)];
+            }
+            $row['local_product_name'] = $p ? (string) $p['global_product_name'] : '';
+            $row['local_product_unit'] = $p ? (string) $p['global_product_unit'] : '';
+        }
+        unset($row);
+
+        return $rows;
     }
 
     // =========================================================================
@@ -629,7 +760,6 @@ class TGS_HTSoft_Stock_Converter
         }
 
         $mapping_table = self::table_mapping();
-        $product_table = self::table_product();
 
         $sql = $wpdb->prepare(
             "SELECT
@@ -640,13 +770,8 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
-                m.unit_weight_kg,
-                p.global_product_name AS local_product_name,
-                p.global_product_unit AS local_product_unit
+                m.unit_weight_kg
              FROM {$mapping_table} m
-             LEFT JOIN {$product_table} p
-                 ON BINARY p.global_product_sku = m.global_product_sku
-                AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
              WHERE m.global_htsoft_stock_convert_id = %d
                AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
              LIMIT 1",
@@ -658,7 +783,9 @@ class TGS_HTSoft_Stock_Converter
             self::error('Không tìm thấy cấu hình.');
             return;
         }
-        self::success(['mapping' => $row]);
+
+        $hydrated = self::attach_product_info([$row]);
+        self::success(['mapping' => $hydrated[0]]);
     }
 
     // =========================================================================
@@ -771,8 +898,9 @@ class TGS_HTSoft_Stock_Converter
         global $wpdb;
 
         $mapping_table = self::table_mapping();
-        $product_table = self::table_product();
 
+        // Không JOIN có BINARY (chặn index → full scan bảng sản phẩm cho mỗi dòng).
+        // Lấy mapping trước, rồi bổ sung tên sản phẩm theo lô 1000 SKU.
         $rows = $wpdb->get_results(
             "SELECT
                 m.global_product_sku,
@@ -780,16 +908,20 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
-                m.unit_weight_kg,
-                p.global_product_name AS local_product_name
+                m.unit_weight_kg
              FROM {$mapping_table} m
-             LEFT JOIN {$product_table} p
-                 ON BINARY p.global_product_sku = m.global_product_sku
-                AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
              WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
              ORDER BY m.global_product_sku ASC, m.convert_unit ASC",
             ARRAY_A
-        );
+        ) ?: [];
+
+        $hydrated = [];
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            foreach (self::attach_product_info($chunk) as $r) {
+                $hydrated[] = $r;
+            }
+        }
+        $rows = $hydrated;
 
         $export = [];
         foreach ($rows as $row) {
