@@ -1,6 +1,6 @@
 <?php
 /**
- * View: Quy đổi tồn HTSoft
+ * View: Quản lý đơn vị tính và giá theo ĐVT
  * Giao diện đơn giản không tab - Cấu hình DVT quy đổi cho POS
  */
 
@@ -31,10 +31,10 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     <div class="tgs-icon-badge">
                         <i class="bx bx-transfer"></i>
                     </div>
-                    <h3 class="fw-bold mb-0">Quy đổi đơn vị tính HTSoft</h3>
+                    <h3 class="fw-bold mb-0">Quản lý đơn vị tính và giá theo ĐVT</h3>
                 </div>
                 <p class="text-muted mb-0 small">
-                    Cấu hình tỷ lệ quy đổi cho các đơn vị bán (Lốc, Vỉ, Thùng…) để POS tính đúng tồn kho
+                    Cấu hình tỷ lệ quy đổi và giá bán cho các đơn vị bán (Lốc, Vỉ, Thùng…) để POS tính đúng tồn kho
                 </p>
             </div>
             <a href="<?php echo esc_url($products_url); ?>" class="btn btn-outline-secondary">

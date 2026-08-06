@@ -67,7 +67,7 @@ class TGS_HTSoft_Stock_Converter
     public function register_route($routes)
     {
         $routes[self::VIEW_SLUG] = [
-            'Quy đổi tồn HTSoft',
+            'Quản lý đơn vị tính và giá theo ĐVT',
             TGS_HTSOFT_CONVERTER_DIR . 'admin/views/page-htsoft-stock-converter.php',
         ];
         return $routes;
@@ -79,7 +79,7 @@ class TGS_HTSoft_Stock_Converter
         $active = ($current_view === self::VIEW_SLUG) ? 'active' : '';
 
         echo '<li><a href="' . esc_url($url) . '" class="' . esc_attr($active) . '">'
-            . '<i class="bx bx-transfer"></i>Quy đổi tồn HTSoft</a></li>';
+            . '<i class="bx bx-transfer"></i>Quản lý đơn vị tính và giá theo ĐVT</a></li>';
     }
 
     public function enqueue_assets($hook)
