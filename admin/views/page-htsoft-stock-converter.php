@@ -43,7 +43,67 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
         </div>
     </div>
 
-    <div class="tgs-content-wrapper">
+    <!-- ══════════════════════════════════════════════════════════════════
+         MÀN HÌNH 1: Danh sách bảng giá
+         ══════════════════════════════════════════════════════════════════ -->
+    <div id="plListSection">
+        <div class="tgs-table-panel">
+            <div class="tgs-table-header">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div>
+                        <h6 class="mb-1 fw-semibold">Danh sách bảng giá</h6>
+                        <p class="text-muted small mb-0">
+                            Mỗi bảng giá có bộ cấu hình ĐVT + giá riêng. Mỗi website chỉ áp dụng 1 bảng giá.
+                        </p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" id="btnNewPriceList">
+                        <i class="bx bx-plus me-1"></i>Tạo bảng giá
+                    </button>
+                </div>
+            </div>
+            <div class="p-3">
+                <div id="plCards" class="row g-3">
+                    <div class="col-12 text-center text-muted py-4">
+                        <span class="spinner-border spinner-border-sm me-2"></span>Đang tải bảng giá…
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         MÀN HÌNH 2: Cấu hình bên trong 1 bảng giá
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="tgs-content-wrapper" id="plDetailSection" style="display:none">
+
+        <!-- Thanh điều hướng bảng giá đang mở -->
+        <div class="tgs-table-panel mb-4">
+            <div class="tgs-table-header">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnBackToPriceLists">
+                            <i class="bx bx-chevron-left me-1"></i>Danh sách bảng giá
+                        </button>
+                        <div>
+                            <div class="fw-semibold" id="plCurrentName">—</div>
+                            <div class="text-muted small">
+                                Mã: <code id="plCurrentCode">—</code>
+                                · <span id="plCurrentStats">—</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center flex-wrap gap-2">
+                        <span class="badge bg-light text-dark" id="plCurrentBlogs">Chưa áp website nào</span>
+                        <button type="button" class="btn btn-sm btn-info" id="btnApplyBlogs">
+                            <i class="bx bx-globe me-1"></i>Áp dụng cho website
+                        </button>
+                        <button type="button" class="btn btn-sm btn-light" id="btnEditPriceList">
+                            <i class="bx bx-edit-alt me-1"></i>Sửa bảng giá
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- ── Section: Tìm kiếm & Cấu hình sản phẩm ────────────────── -->
         <div class="row g-4 mb-4">
@@ -320,6 +380,127 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
 
     </div><!-- /.tgs-content-wrapper -->
 </div><!-- /.tgs-htsoft-converter-page -->
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- Modal: Tạo / sửa bảng giá                                            -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="priceListModal" tabindex="-1" aria-labelledby="priceListModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title" id="priceListModalLabel">
+                    <i class="bx bx-purchase-tag me-2 text-primary"></i>Tạo bảng giá
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="plFormId" value="0">
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Tên bảng giá <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="plFormName"
+                           placeholder="VD: Bảng giá công ty TGS, Bảng giá Phú Thọ…">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Mã bảng giá</label>
+                    <input type="text" class="form-control" id="plFormCode" placeholder="Để trống sẽ tự sinh từ tên">
+                    <div class="form-text">Dùng để đối chiếu khi đồng bộ — không trùng nhau</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Ghi chú</label>
+                    <textarea class="form-control" id="plFormNote" rows="2"
+                              placeholder="Phạm vi áp dụng, người phụ trách…"></textarea>
+                </div>
+
+                <div class="mb-3" id="plFormCopyWrap">
+                    <label class="form-label fw-semibold">Sao chép cấu hình từ bảng giá</label>
+                    <select class="form-select" id="plFormCopyFrom">
+                        <option value="0">— Tạo bảng giá trống —</option>
+                    </select>
+                    <div class="form-text">
+                        Chép toàn bộ ĐVT, tỷ lệ quy đổi, giá bán và ĐVT bán chính sang bảng giá mới
+                    </div>
+                </div>
+
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="plFormStatus" checked>
+                    <label class="form-check-label" for="plFormStatus">Đang hoạt động</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="plFormIsDefault">
+                    <label class="form-check-label" for="plFormIsDefault">
+                        Là bảng giá mặc định
+                        <span class="text-muted small d-block">Website chưa được gán bảng giá riêng sẽ dùng bảng này</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="plFormSave">
+                    <i class="bx bx-save me-1"></i>Lưu bảng giá
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- Modal: Áp dụng bảng giá cho website                                   -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="applyBlogsModal" tabindex="-1" aria-labelledby="applyBlogsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title" id="applyBlogsModalLabel">
+                    <i class="bx bx-globe me-2 text-info"></i>Áp dụng bảng giá cho website
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-secondary py-2 small mb-3">
+                    Đang áp dụng bảng giá: <strong id="abListName">—</strong>.
+                    Mỗi website chỉ áp <strong>1 bảng giá</strong> — tick vào đây sẽ tự gỡ website đó
+                    khỏi bảng giá cũ. Bỏ tick = gỡ khỏi bảng giá này (website sẽ quay về bảng giá mặc định).
+                </div>
+
+                <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+                    <div class="input-group input-group-sm" style="max-width:280px;">
+                        <span class="input-group-text"><i class="bx bx-search"></i></span>
+                        <input type="text" class="form-control" id="abSearch" placeholder="Lọc website…">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-light" id="abCheckAll">Chọn tất cả</button>
+                    <button type="button" class="btn btn-sm btn-light" id="abUncheckAll">Bỏ chọn tất cả</button>
+                    <span class="ms-auto small text-muted"><span id="abSelectedCount">0</span> website được chọn</span>
+                </div>
+
+                <div style="max-height:380px; overflow-y:auto;" class="border rounded">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light" style="position:sticky; top:0; z-index:1;">
+                            <tr>
+                                <th style="width:44px;"></th>
+                                <th>Website</th>
+                                <th>Đang áp bảng giá</th>
+                            </tr>
+                        </thead>
+                        <tbody id="abBlogList">
+                            <tr><td colspan="3" class="text-center text-muted py-3">
+                                <span class="spinner-border spinner-border-sm me-2"></span>Đang tải danh sách website…
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-info text-white" id="abSave">
+                    <i class="bx bx-check me-1"></i>Lưu áp dụng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <!-- Modal: Import Excel (batch, hỗ trợ 20k+ dòng)                        -->

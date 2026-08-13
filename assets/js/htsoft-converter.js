@@ -11,6 +11,11 @@
      * State
      * ====================================================================== */
     const state = {
+        // ── Bảng giá đang mở ───────────────────────────────────────────
+        priceListId:        0,      // 0 = đang ở màn hình danh sách bảng giá
+        priceLists:         [],     // cache danh sách bảng giá + thống kê
+        blogRows:           [],     // danh sách website cho modal "Áp dụng"
+
         scanner:            null,
         scannerCooldownAt:  0,
         searchTimer:        null,
@@ -104,6 +109,11 @@
         for (const [k, v] of Object.entries(payload || {})) {
             body.append(k, v);
         }
+        // Mọi thao tác cấu hình đều thuộc về 1 bảng giá → tự đính kèm
+        // price_list_id để không phải nhớ truyền ở từng lời gọi.
+        if (!body.has('price_list_id') && state.priceListId) {
+            body.append('price_list_id', state.priceListId);
+        }
         const init = { method: 'POST', body };
         if (opts && opts.signal) { init.signal = opts.signal; }
         return fetch(CFG.ajaxUrl, init).then((r) => r.json());
@@ -133,6 +143,451 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    /* =========================================================================
+     * BẢNG GIÁ — màn hình danh sách + chuyển vào cấu hình
+     * ====================================================================== */
+
+    const plDom = {
+        listSection:   el('plListSection'),
+        detailSection: el('plDetailSection'),
+        cards:         el('plCards'),
+        btnNew:        el('btnNewPriceList'),
+        btnBack:       el('btnBackToPriceLists'),
+        btnEdit:       el('btnEditPriceList'),
+        btnApplyBlogs: el('btnApplyBlogs'),
+        currentName:   el('plCurrentName'),
+        currentCode:   el('plCurrentCode'),
+        currentStats:  el('plCurrentStats'),
+        currentBlogs:  el('plCurrentBlogs'),
+
+        formId:        el('plFormId'),
+        formName:      el('plFormName'),
+        formCode:      el('plFormCode'),
+        formNote:      el('plFormNote'),
+        formCopyWrap:  el('plFormCopyWrap'),
+        formCopyFrom:  el('plFormCopyFrom'),
+        formStatus:    el('plFormStatus'),
+        formIsDefault: el('plFormIsDefault'),
+        formSave:      el('plFormSave'),
+    };
+
+    var _plModal = null;
+    function getPlModal() {
+        if (!_plModal) {
+            var m = document.getElementById('priceListModal');
+            if (m) _plModal = new bootstrap.Modal(m);
+        }
+        return _plModal;
+    }
+
+    function findPriceList(id) {
+        id = parseInt(id, 10);
+        for (var i = 0; i < state.priceLists.length; i++) {
+            if (parseInt(state.priceLists[i].global_htsoft_price_list_id, 10) === id) {
+                return state.priceLists[i];
+            }
+        }
+        return null;
+    }
+
+    function loadPriceLists(then) {
+        // Không gửi kèm price_list_id của màn đang mở → dùng payload rỗng
+        postAjax('tgs_htsoft_converter_list_price_lists', {})
+            .then(function (res) {
+                if (!res.success) {
+                    plDom.cards.innerHTML = '<div class="col-12 text-danger text-center py-4">Lỗi tải danh sách bảng giá.</div>';
+                    return;
+                }
+                state.priceLists = res.data.price_lists || [];
+                renderPriceListCards();
+                if (typeof then === 'function') then();
+            })
+            .catch(function () {
+                plDom.cards.innerHTML = '<div class="col-12 text-danger text-center py-4">Lỗi kết nối.</div>';
+            });
+    }
+
+    function renderPriceListCards() {
+        if (!plDom.cards) return;
+
+        if (!state.priceLists.length) {
+            plDom.cards.innerHTML =
+                '<div class="col-12 text-center text-muted py-5">'
+                + '<div class="mb-2"><i class="bx bx-purchase-tag" style="font-size:2rem;"></i></div>'
+                + 'Chưa có bảng giá nào. Bấm <strong>Tạo bảng giá</strong> để bắt đầu.'
+                + '</div>';
+            return;
+        }
+
+        var html = '';
+        state.priceLists.forEach(function (p) {
+            var id       = p.global_htsoft_price_list_id;
+            var isDef    = parseInt(p.is_default, 10) === 1;
+            var isOff    = parseInt(p.price_list_status, 10) !== 1;
+            var blogText = (p.blog_names && p.blog_names.length)
+                ? p.blog_names.map(escHtml).join(', ')
+                : '<span class="text-muted">Chưa áp website nào</span>';
+
+            html += '<div class="col-12 col-md-6 col-xl-4">' +
+                '<div class="border rounded h-100 p-3 d-flex flex-column' + (isOff ? ' opacity-75' : '') + '">' +
+                    '<div class="d-flex justify-content-between align-items-start gap-2 mb-2">' +
+                        '<div>' +
+                            '<div class="fw-semibold">' + escHtml(p.price_list_name) +
+                                (isDef ? ' <span class="badge bg-dark ms-1">Mặc định</span>' : '') +
+                                (isOff ? ' <span class="badge bg-secondary ms-1">Ngừng</span>' : '') +
+                            '</div>' +
+                            '<div class="small text-muted"><code>' + escHtml(p.price_list_code || '') + '</code></div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="small text-muted mb-2">' + escHtml(p.price_list_note || '') + '</div>' +
+                    '<div class="d-flex gap-3 small mb-2 flex-wrap">' +
+                        '<span><strong>' + Number(p.sku_count || 0).toLocaleString('vi-VN') + '</strong> mã hàng</span>' +
+                        '<span><strong>' + Number(p.config_count || 0).toLocaleString('vi-VN') + '</strong> dòng ĐVT</span>' +
+                        '<span><strong>' + Number(p.default_unit_count || 0).toLocaleString('vi-VN') + '</strong> ĐVT chính</span>' +
+                    '</div>' +
+                    '<div class="small mb-3"><i class="bx bx-globe me-1"></i>' + blogText + '</div>' +
+                    '<div class="mt-auto d-flex gap-2 flex-wrap">' +
+                        '<button class="btn btn-sm btn-primary" data-pl-open="' + id + '">' +
+                            '<i class="bx bx-cog me-1"></i>Quản lý ĐVT &amp; giá</button>' +
+                        '<button class="btn btn-sm btn-outline-info" data-pl-blogs="' + id + '" title="Áp dụng cho website">' +
+                            '<i class="bx bx-globe"></i></button>' +
+                        '<button class="btn btn-sm btn-outline-secondary" data-pl-edit="' + id + '" title="Sửa">' +
+                            '<i class="bx bx-edit-alt"></i></button>' +
+                        (isDef ? '' :
+                        '<button class="btn btn-sm btn-outline-danger" data-pl-delete="' + id + '" title="Xóa">' +
+                            '<i class="bx bx-trash"></i></button>') +
+                    '</div>' +
+                '</div></div>';
+        });
+
+        plDom.cards.innerHTML = html;
+
+        plDom.cards.querySelectorAll('[data-pl-open]').forEach(function (b) {
+            b.addEventListener('click', function () { openPriceList(b.dataset.plOpen); });
+        });
+        plDom.cards.querySelectorAll('[data-pl-edit]').forEach(function (b) {
+            b.addEventListener('click', function () { openPriceListForm(b.dataset.plEdit); });
+        });
+        plDom.cards.querySelectorAll('[data-pl-delete]').forEach(function (b) {
+            b.addEventListener('click', function () { deletePriceList(b.dataset.plDelete); });
+        });
+        plDom.cards.querySelectorAll('[data-pl-blogs]').forEach(function (b) {
+            b.addEventListener('click', function () { openApplyBlogsModal(b.dataset.plBlogs); });
+        });
+    }
+
+    /** Vào màn hình cấu hình của 1 bảng giá */
+    function openPriceList(id) {
+        var p = findPriceList(id);
+        if (!p) return;
+
+        state.priceListId = parseInt(id, 10);
+
+        // Reset toàn bộ trạng thái của bảng giá trước đó
+        state.selectedProduct = null;
+        state.mappingLoaded   = false;
+        state.mappingRows     = [];
+        state.mappingPage     = 1;
+        if (dom.cfgSku)        dom.cfgSku.value = '';
+        if (dom.cfgEmptyState) dom.cfgEmptyState.style.display = '';
+        if (dom.cfgContent)    dom.cfgContent.style.display    = 'none';
+        if (dom.cfgSearchKeyword) dom.cfgSearchKeyword.value   = '';
+        renderSearchResults([]);
+        hideStaleNotice();
+        if (dom.mappingTableBody) {
+            dom.mappingTableBody.innerHTML =
+                '<tr><td colspan="8" class="text-center text-muted py-4">'
+                + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
+                + '</td></tr>';
+        }
+        renderMappingsPagination();
+        if (dom.mappingTableFooter) dom.mappingTableFooter.textContent = '';
+
+        renderPriceListHeader(p);
+
+        plDom.listSection.style.display   = 'none';
+        plDom.detailSection.style.display = '';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderPriceListHeader(p) {
+        if (!p) return;
+        plDom.currentName.textContent = p.price_list_name;
+        plDom.currentCode.textContent = p.price_list_code || '—';
+        plDom.currentStats.textContent =
+            Number(p.sku_count || 0).toLocaleString('vi-VN') + ' mã hàng · ' +
+            Number(p.config_count || 0).toLocaleString('vi-VN') + ' dòng ĐVT · ' +
+            Number(p.default_unit_count || 0).toLocaleString('vi-VN') + ' ĐVT chính';
+
+        if (p.blog_names && p.blog_names.length) {
+            plDom.currentBlogs.textContent = 'Áp dụng: ' + p.blog_names.join(', ');
+            plDom.currentBlogs.className   = 'badge bg-info text-dark';
+        } else {
+            plDom.currentBlogs.textContent = 'Chưa áp website nào';
+            plDom.currentBlogs.className   = 'badge bg-light text-dark';
+        }
+    }
+
+    function backToPriceLists() {
+        state.priceListId = 0;
+        plDom.detailSection.style.display = 'none';
+        plDom.listSection.style.display   = '';
+        loadPriceLists();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    /** Mở form tạo (id rỗng) hoặc sửa bảng giá */
+    function openPriceListForm(id) {
+        var p = id ? findPriceList(id) : null;
+
+        plDom.formId.value        = p ? p.global_htsoft_price_list_id : '0';
+        plDom.formName.value      = p ? (p.price_list_name || '') : '';
+        plDom.formCode.value      = p ? (p.price_list_code || '') : '';
+        plDom.formNote.value      = p ? (p.price_list_note || '') : '';
+        plDom.formStatus.checked  = p ? (parseInt(p.price_list_status, 10) === 1) : true;
+        plDom.formIsDefault.checked = p ? (parseInt(p.is_default, 10) === 1) : false;
+
+        // Chỉ cho sao chép khi TẠO MỚI
+        plDom.formCopyWrap.style.display = p ? 'none' : '';
+        var opts = '<option value="0">— Tạo bảng giá trống —</option>';
+        state.priceLists.forEach(function (item) {
+            opts += '<option value="' + item.global_htsoft_price_list_id + '">'
+                + escHtml(item.price_list_name)
+                + ' (' + Number(item.config_count || 0).toLocaleString('vi-VN') + ' dòng)'
+                + '</option>';
+        });
+        plDom.formCopyFrom.innerHTML = opts;
+
+        document.getElementById('priceListModalLabel').innerHTML = p
+            ? '<i class="bx bx-edit-alt me-2 text-primary"></i>Sửa bảng giá'
+            : '<i class="bx bx-purchase-tag me-2 text-primary"></i>Tạo bảng giá';
+
+        var m = getPlModal();
+        if (m) m.show();
+    }
+
+    function savePriceList() {
+        var name = (plDom.formName.value || '').trim();
+        if (!name) { toast('Vui lòng nhập tên bảng giá.', 'error'); return; }
+
+        var id = parseInt(plDom.formId.value, 10) || 0;
+
+        plDom.formSave.disabled = true;
+        postAjax('tgs_htsoft_converter_save_price_list', {
+            id:                id,
+            price_list_name:   name,
+            price_list_code:   (plDom.formCode.value || '').trim(),
+            price_list_note:   (plDom.formNote.value || '').trim(),
+            price_list_status: plDom.formStatus.checked ? 1 : 0,
+            is_default:        plDom.formIsDefault.checked ? 1 : 0,
+            copy_from_id:      id === 0 ? (parseInt(plDom.formCopyFrom.value, 10) || 0) : 0,
+        }).then(function (res) {
+            if (!res.success) {
+                toast((res.data && res.data.message) || 'Lỗi lưu bảng giá.', 'error');
+                return;
+            }
+            toast(res.data.message || 'Đã lưu bảng giá.', 'success');
+            var m = getPlModal();
+            if (m) m.hide();
+
+            loadPriceLists(function () {
+                // Đang mở bảng giá này thì cập nhật lại thanh tiêu đề
+                if (state.priceListId) {
+                    renderPriceListHeader(findPriceList(state.priceListId));
+                }
+            });
+        }).catch(function () { toast('Loi ket noi.', 'error'); })
+          .finally(function () { plDom.formSave.disabled = false; });
+    }
+
+    function deletePriceList(id) {
+        var p = findPriceList(id);
+        if (!p) return;
+        if (!confirm('Xóa bảng giá "' + p.price_list_name + '"?\n'
+            + 'Toàn bộ cấu hình ĐVT bên trong cũng bị xóa theo.')) {
+            return;
+        }
+
+        postAjax('tgs_htsoft_converter_delete_price_list', { id: id })
+            .then(function (res) {
+                if (!res.success) {
+                    toast((res.data && res.data.message) || 'Không xóa được bảng giá.', 'error');
+                    return;
+                }
+                toast(res.data.message || 'Đã xóa bảng giá.', 'success');
+                if (parseInt(id, 10) === state.priceListId) {
+                    backToPriceLists();
+                } else {
+                    loadPriceLists();
+                }
+            })
+            .catch(function () { toast('Loi ket noi.', 'error'); });
+    }
+
+    /* ── Modal: áp dụng bảng giá cho website ───────────────────────────── */
+
+    var _abModal = null;
+    var _abListId = 0;
+
+    function getAbModal() {
+        if (!_abModal) {
+            var m = document.getElementById('applyBlogsModal');
+            if (m) _abModal = new bootstrap.Modal(m);
+        }
+        return _abModal;
+    }
+
+    function openApplyBlogsModal(id) {
+        _abListId = parseInt(id, 10) || state.priceListId;
+        var p = findPriceList(_abListId);
+        if (!p) return;
+
+        document.getElementById('abListName').textContent = p.price_list_name;
+        document.getElementById('abBlogList').innerHTML =
+            '<tr><td colspan="3" class="text-center text-muted py-3">'
+            + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải danh sách website…</td></tr>';
+
+        var m = getAbModal();
+        if (m) m.show();
+
+        postAjax('tgs_htsoft_converter_list_price_list_blogs', {})
+            .then(function (res) {
+                if (!res.success) {
+                    document.getElementById('abBlogList').innerHTML =
+                        '<tr><td colspan="3" class="text-danger text-center py-3">Lỗi tải danh sách website.</td></tr>';
+                    return;
+                }
+                state.blogRows = res.data.blogs || [];
+                renderBlogRows('');
+            })
+            .catch(function () {
+                document.getElementById('abBlogList').innerHTML =
+                    '<tr><td colspan="3" class="text-danger text-center py-3">Lỗi kết nối.</td></tr>';
+            });
+    }
+
+    function renderBlogRows(filter) {
+        var body = document.getElementById('abBlogList');
+        if (!body) return;
+
+        var kw   = (filter || '').toLowerCase();
+        var rows = state.blogRows.filter(function (b) {
+            if (!kw) return true;
+            return (b.blog_name || '').toLowerCase().indexOf(kw) !== -1
+                || (b.blog_url || '').toLowerCase().indexOf(kw) !== -1;
+        });
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">Không có website phù hợp.</td></tr>';
+            updateBlogSelectedCount();
+            return;
+        }
+
+        var html = '';
+        rows.forEach(function (b) {
+            var mine    = parseInt(b.price_list_id, 10) === _abListId;
+            var other   = (!mine && parseInt(b.price_list_id, 10) > 0);
+            var current = mine
+                ? '<span class="badge bg-info text-dark">Bảng giá này</span>'
+                : (other
+                    ? '<span class="badge bg-warning text-dark">' + escHtml(b.price_list_name) + '</span>'
+                    : '<span class="text-muted small">Mặc định</span>');
+
+            html += '<tr>' +
+                '<td><input type="checkbox" class="form-check-input ab-blog" value="' + b.blog_id + '"' +
+                    (mine ? ' checked' : '') + '></td>' +
+                '<td><div class="fw-semibold">' + escHtml(b.blog_name) + '</div>' +
+                    '<div class="small text-muted">#' + b.blog_id + ' · ' + escHtml(b.blog_url || '') + '</div></td>' +
+                '<td>' + current + '</td>' +
+                '</tr>';
+        });
+        body.innerHTML = html;
+
+        body.querySelectorAll('.ab-blog').forEach(function (cb) {
+            cb.addEventListener('change', updateBlogSelectedCount);
+        });
+        updateBlogSelectedCount();
+    }
+
+    function collectCheckedBlogIds() {
+        var ids = [];
+        document.querySelectorAll('#abBlogList .ab-blog:checked').forEach(function (cb) {
+            ids.push(parseInt(cb.value, 10));
+        });
+        return ids;
+    }
+
+    function updateBlogSelectedCount() {
+        var elCount = document.getElementById('abSelectedCount');
+        if (elCount) elCount.textContent = collectCheckedBlogIds().length;
+    }
+
+    function saveApplyBlogs() {
+        // Lưu ý: danh sách đang hiển thị có thể đã bị lọc → gộp với các website
+        // của bảng giá này nhưng đang bị ẩn bởi bộ lọc, tránh gỡ nhầm.
+        var checked = collectCheckedBlogIds();
+        var visible = [];
+        document.querySelectorAll('#abBlogList .ab-blog').forEach(function (cb) {
+            visible.push(parseInt(cb.value, 10));
+        });
+
+        state.blogRows.forEach(function (b) {
+            var bid = parseInt(b.blog_id, 10);
+            if (visible.indexOf(bid) === -1 && parseInt(b.price_list_id, 10) === _abListId) {
+                checked.push(bid);
+            }
+        });
+
+        var btn = document.getElementById('abSave');
+        if (btn) btn.disabled = true;
+
+        postAjax('tgs_htsoft_converter_assign_price_list_blogs', {
+            price_list_id: _abListId,
+            blog_ids:      JSON.stringify(checked),
+        }).then(function (res) {
+            if (!res.success) {
+                toast((res.data && res.data.message) || 'Lỗi áp dụng bảng giá.', 'error');
+                return;
+            }
+            toast(res.data.message || 'Đã áp dụng.', 'success');
+            var m = getAbModal();
+            if (m) m.hide();
+            loadPriceLists(function () {
+                if (state.priceListId) renderPriceListHeader(findPriceList(state.priceListId));
+            });
+        }).catch(function () { toast('Loi ket noi.', 'error'); })
+          .finally(function () { if (btn) btn.disabled = false; });
+    }
+
+    function bindPriceListEvents() {
+        if (plDom.btnNew)        plDom.btnNew.addEventListener('click', function () { openPriceListForm(0); });
+        if (plDom.btnBack)       plDom.btnBack.addEventListener('click', backToPriceLists);
+        if (plDom.btnEdit)       plDom.btnEdit.addEventListener('click', function () { openPriceListForm(state.priceListId); });
+        if (plDom.btnApplyBlogs) plDom.btnApplyBlogs.addEventListener('click', function () { openApplyBlogsModal(state.priceListId); });
+        if (plDom.formSave)      plDom.formSave.addEventListener('click', savePriceList);
+
+        var abSearch = el('abSearch');
+        if (abSearch) {
+            abSearch.addEventListener('input', function () { renderBlogRows(abSearch.value); });
+        }
+        var abCheckAll = el('abCheckAll');
+        if (abCheckAll) {
+            abCheckAll.addEventListener('click', function () {
+                document.querySelectorAll('#abBlogList .ab-blog').forEach(function (cb) { cb.checked = true; });
+                updateBlogSelectedCount();
+            });
+        }
+        var abUncheckAll = el('abUncheckAll');
+        if (abUncheckAll) {
+            abUncheckAll.addEventListener('click', function () {
+                document.querySelectorAll('#abBlogList .ab-blog').forEach(function (cb) { cb.checked = false; });
+                updateBlogSelectedCount();
+            });
+        }
+        var abSave = el('abSave');
+        if (abSave) abSave.addEventListener('click', saveApplyBlogs);
     }
 
     /* =========================================================================
@@ -1655,7 +2110,11 @@
      * ====================================================================== */
     function init() {
         bindEvents();
+        bindPriceListEvents();
         initScanner();
+
+        // Vào trang là màn hình DANH SÁCH BẢNG GIÁ, chọn bảng giá mới cấu hình
+        loadPriceLists();
 
         if (dom.mappingPerPage) {
             state.mappingPerPage = parseInt(dom.mappingPerPage.value, 10) || 50;
