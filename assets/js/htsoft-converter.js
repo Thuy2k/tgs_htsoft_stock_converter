@@ -56,6 +56,7 @@
         cfgNote:               el('cfgNote'),
         cfgUnitPrice:          el('cfgUnitPrice'),
         cfgUnitWeightKg:       el('cfgUnitWeightKg'),
+        cfgIsDefaultUnit:      el('cfgIsDefaultUnit'),
         cfgRatioPreview:       el('cfgRatioPreview'),
         cfgEditTitle:          el('cfgEditTitle'),
         cfgFormMode:           el('cfgFormMode'),
@@ -78,7 +79,18 @@
 
         btnImportPriceExcel:   el('btnImportPriceExcel'),
         priceImportFile:       el('priceImportFile'),
+
+        btnUnifyDefaultUnit:   el('btnUnifyDefaultUnit'),
     };
+
+    /** Cờ ĐVT bán chính từ server có thể là 1 / '1' / true */
+    function isDefaultUnit(row) {
+        return parseInt(row && row.is_default_unit, 10) === 1;
+    }
+
+    var DEFAULT_UNIT_BADGE =
+        '<span class="badge bg-dark ms-1" title="ĐVT được POS ưu tiên khi tìm sản phẩm">' +
+        '<i class="bx bx-star me-1"></i>ĐVT chính</span>';
 
     /* =========================================================================
      * AJAX helper
@@ -230,12 +242,19 @@
                 ? '<span class="text-info">' + formatWeight(parseFloat(c.unit_weight_kg)) + ' kg</span>'
                 : '<span class="text-muted">—</span>';
             var unitDisplay = c.convert_unit ? '<strong>' + escHtml(c.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
+            var isDefault = isDefaultUnit(c);
+            if (isDefault) unitDisplay += DEFAULT_UNIT_BADGE;
+            var defaultBtn = isDefault
+                ? ''
+                : '<button class="btn btn-xs btn-outline-dark me-1" data-cfg-default="' + c.global_htsoft_stock_convert_id + '"' +
+                  ' title="Đặt làm ĐVT bán chính"><i class="bx bx-star"></i></button>';
             html += '<tr>' +
                 '<td>' + unitDisplay + '<br><small class="text-muted">' + escHtml(c.convert_note || '') + '</small></td>' +
                 '<td class="fw-semibold text-primary">× ' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
                 '<td>' + priceCell + '</td>' +
                 '<td>' + weightCell + '</td>' +
                 '<td class="text-end text-nowrap">' +
+                defaultBtn +
                 '<button class="btn btn-xs btn-light me-1" data-cfg-edit="' + c.global_htsoft_stock_convert_id + '" title="Chỉnh sửa">' +
                 '<i class="bx bx-edit-alt"></i></button>' +
                 '<button class="btn btn-xs btn-outline-danger" data-cfg-delete="' + c.global_htsoft_stock_convert_id + '" data-cfg-unit="' + escHtml(c.convert_unit || '') + '" title="Xóa">' +
@@ -255,6 +274,29 @@
                 deleteConfig(parseInt(btn.dataset.cfgDelete, 10), btn.dataset.cfgUnit);
             });
         });
+        dom.cfgExistingConfigs.querySelectorAll('[data-cfg-default]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                setDefaultUnit(parseInt(btn.dataset.cfgDefault, 10));
+            });
+        });
+    }
+
+    /**
+     * Đặt 1 cấu hình làm ĐVT bán chính — server tự hạ cờ các DVT khác cùng SKU về 0.
+     */
+    function setDefaultUnit(id) {
+        postAjax('tgs_htsoft_converter_set_default_unit', { id: id })
+            .then(function (res) {
+                if (!res.success) {
+                    toast((res.data && res.data.message) || 'Không đặt được ĐVT chính.', 'error');
+                    return;
+                }
+                toast((res.data && res.data.message) || 'Đã đặt ĐVT bán chính.', 'success');
+                var sku = dom.cfgSku ? dom.cfgSku.value : '';
+                if (sku) loadConfigsForSku(sku);
+                markMappingsStale();
+            })
+            .catch(function () { toast('Loi ket noi.', 'error'); });
     }
 
     function editConfigById(id, configs) {
@@ -273,6 +315,7 @@
         if (dom.cfgNote)            dom.cfgNote.value             = c.convert_note || '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = (c.unit_price !== null && c.unit_price !== undefined && c.unit_price !== '') ? c.unit_price : '';
         if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = (c.unit_weight_kg !== null && c.unit_weight_kg !== undefined && c.unit_weight_kg !== '') ? c.unit_weight_kg : '';
+        if (dom.cfgIsDefaultUnit)   dom.cfgIsDefaultUnit.checked  = isDefaultUnit(c);
         if (dom.cfgFormMode) {
             dom.cfgFormMode.textContent = 'Chỉnh sửa';
             dom.cfgFormMode.style.display = '';
@@ -295,6 +338,7 @@
         if (dom.cfgNote)            dom.cfgNote.value             = '';
         if (dom.cfgUnitPrice)       dom.cfgUnitPrice.value        = '';
         if (dom.cfgUnitWeightKg)    dom.cfgUnitWeightKg.value     = '';
+        if (dom.cfgIsDefaultUnit)   dom.cfgIsDefaultUnit.checked  = false;
         if (dom.cfgFormMode) {
             dom.cfgFormMode.textContent = 'Thêm mới';
             dom.cfgFormMode.style.display = 'none';
@@ -360,6 +404,7 @@
             convert_note:       note,
             unit_price:         rawPrice,
             unit_weight_kg:     rawWeight.replace(',', '.'),
+            is_default_unit:    (dom.cfgIsDefaultUnit && dom.cfgIsDefaultUnit.checked) ? 1 : 0,
         }).then(function (res) {
             if (res.success) {
                 toast(res.data.message || 'Da luu.', 'success');
@@ -553,6 +598,7 @@
                 ? '<span class="text-info">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
                 : '<span class="text-muted">—</span>';
             var unitDisplay = r.convert_unit ? '<strong>' + escHtml(r.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
+            if (isDefaultUnit(r)) unitDisplay += '<br>' + DEFAULT_UNIT_BADGE;
             html += '<tr data-row-id="' + r.global_htsoft_stock_convert_id + '">' +
                 '<td><code class="text-primary">' + escHtml(r.global_product_sku) + '</code></td>' +
                 '<td>' + escHtml(r.local_product_name || '') + '</td>' +
@@ -642,7 +688,7 @@
                 var rows = res.data.rows || [];
                 if (!rows.length) { toast('Khong co du lieu de xuat.', 'error'); return; }
 
-                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Gia ban (VND)', 'Khoi luong kg/1 DVT', 'Ghi chu']];
+                var data = [['Ma hang', 'Ten hang', 'Don vi tinh', 'Ty le quy doi', 'Gia ban (VND)', 'Khoi luong kg/1 DVT', 'Ghi chu', 'DVT ban chinh']];
                 rows.forEach(function (r) {
                     var price = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '') ? r.unit_price : '';
                     var weight = (r.unit_weight_kg !== null && r.unit_weight_kg !== undefined && r.unit_weight_kg !== '') ? r.unit_weight_kg : '';
@@ -654,6 +700,7 @@
                         price,
                         weight,
                         r.convert_note || '',
+                        isDefaultUnit(r) ? 1 : 0,
                     ]);
                 });
 
@@ -1200,6 +1247,237 @@
     }
 
     /* =========================================================================
+     * Thống nhất ĐVT bán chính (quét toàn bộ theo batch SKU)
+     * ====================================================================== */
+
+    var _duModal = null;
+    var _duDom   = null;
+    var _duState = null;
+
+    function getDuModal() {
+        if (!_duModal) {
+            var elModal = document.getElementById('defaultUnitModal');
+            if (elModal) _duModal = new bootstrap.Modal(elModal, { backdrop: 'static', keyboard: false });
+        }
+        return _duModal;
+    }
+
+    function getDuDom() {
+        if (!_duDom) {
+            _duDom = {
+                intro:          el('duIntro'),
+                onlyMissing:    el('duOnlyMissing'),
+                totalInfo:      el('duTotalInfo'),
+                progressWrap:   el('duProgressWrap'),
+                progressBar:    el('duProgressBar'),
+                progressText:   el('duProgressText'),
+                progressPct:    el('duProgressPct'),
+                statProcessed:  el('duStatProcessed'),
+                statAssigned:   el('duStatAssigned'),
+                statUnchanged:  el('duStatUnchanged'),
+                statNoCandidate: el('duStatNoCandidate'),
+                resultWrap:     el('duResultWrap'),
+                resultDone:     el('duResultDone'),
+                resultStopped:  el('duResultStopped'),
+                samplesWrap:    el('duSamplesWrap'),
+                samplesBody:    el('duSamplesBody'),
+                errorsWrap:     el('duErrorsWrap'),
+                errorsUl:       el('duErrorsUl'),
+                startBtn:       el('duStartBtn'),
+                stopBtn:        el('duStopBtn'),
+                closeBtn:       el('duCloseBtn'),
+            };
+        }
+        return _duDom;
+    }
+
+    /** Mở modal: reset UI + hỏi server tổng số mã hàng cần quét */
+    function openDefaultUnitModal() {
+        var d = getDuDom();
+        if (!d.startBtn) return;
+
+        _duState = { stopped: false, processed: 0, assigned: 0, unchanged: 0, noCandidate: 0,
+                     total: 0, batchSize: 200, samples: [], errors: [], running: false };
+
+        d.intro.classList.remove('d-none');
+        d.progressWrap.classList.add('d-none');
+        d.resultWrap.classList.add('d-none');
+        d.resultDone.classList.add('d-none');
+        d.resultStopped.classList.add('d-none');
+        d.samplesWrap.classList.add('d-none');
+        d.errorsWrap.classList.add('d-none');
+        d.samplesBody.innerHTML = '';
+        d.errorsUl.innerHTML    = '';
+        d.progressBar.style.width = '0%';
+        d.progressBar.classList.add('progress-bar-animated');
+        d.progressPct.textContent = '0%';
+        d.statProcessed.textContent   = '0';
+        d.statAssigned.textContent    = '0';
+        d.statUnchanged.textContent   = '0';
+        d.statNoCandidate.textContent = '0';
+
+        d.startBtn.classList.remove('d-none');
+        d.startBtn.disabled = true;
+        d.stopBtn.classList.add('d-none');
+        d.stopBtn.disabled  = false;
+        d.closeBtn.disabled = false;
+        d.totalInfo.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Đang đếm số mã hàng…';
+
+        d.startBtn.onclick = function () { startDefaultUnitScan(); };
+        d.stopBtn.onclick  = function () {
+            _duState.stopped = true;
+            d.stopBtn.disabled = true;
+            d.stopBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang dừng…';
+        };
+        d.closeBtn.onclick = function () {
+            if (_duState.running) return;
+            var m = getDuModal();
+            if (m) m.hide();
+        };
+
+        var m = getDuModal();
+        if (m) m.show();
+
+        postAjax('tgs_htsoft_converter_default_scan_prepare', {})
+            .then(function (res) {
+                if (!res.success) {
+                    d.totalInfo.innerHTML = '<span class="text-danger">Không đếm được dữ liệu.</span>';
+                    return;
+                }
+                _duState.total     = parseInt(res.data.total_skus, 10) || 0;
+                _duState.batchSize = parseInt(res.data.batch_size, 10) || 200;
+                d.totalInfo.innerHTML = 'Tổng số mã hàng có cấu hình quy đổi: <strong>'
+                    + _duState.total.toLocaleString('vi-VN') + '</strong>';
+                d.startBtn.disabled = (_duState.total === 0);
+            })
+            .catch(function () {
+                d.totalInfo.innerHTML = '<span class="text-danger">Lỗi kết nối.</span>';
+            });
+    }
+
+    function startDefaultUnitScan() {
+        var d = getDuDom();
+
+        _duState.running     = true;
+        _duState.onlyMissing = (d.onlyMissing && d.onlyMissing.checked) ? 1 : 0;
+
+        d.intro.classList.add('d-none');
+        d.progressWrap.classList.remove('d-none');
+        d.startBtn.classList.add('d-none');
+        d.stopBtn.classList.remove('d-none');
+        d.closeBtn.disabled = true;
+
+        runDefaultUnitBatch(0);
+    }
+
+    function runDefaultUnitBatch(offset) {
+        var d = getDuDom();
+
+        if (_duState.stopped) { finishDefaultUnitScan(true); return; }
+
+        d.progressText.textContent = (offset >= _duState.total)
+            ? 'Đang hoàn tất…'
+            : 'Đang xử lý mã hàng ' + (offset + 1)
+              + '–' + Math.min(offset + _duState.batchSize, _duState.total) + ' / ' + _duState.total + '…';
+
+        postAjax('tgs_htsoft_converter_default_scan_batch', {
+            offset:       offset,
+            batch_size:   _duState.batchSize,
+            only_missing: _duState.onlyMissing,
+        }).then(function (res) {
+            if (!res.success) {
+                _duState.errors.push('Lô từ dòng ' + (offset + 1) + ': '
+                    + ((res.data && res.data.message) || 'lỗi không xác định'));
+                finishDefaultUnitScan(false);
+                return;
+            }
+
+            var data = res.data || {};
+            _duState.processed   += parseInt(data.processed, 10) || 0;
+            _duState.assigned    += parseInt(data.assigned, 10) || 0;
+            _duState.unchanged   += parseInt(data.unchanged, 10) || 0;
+            _duState.noCandidate += parseInt(data.no_candidate, 10) || 0;
+
+            if (Array.isArray(data.samples) && _duState.samples.length < 50) {
+                _duState.samples = _duState.samples.concat(data.samples).slice(0, 50);
+            }
+
+            var pct = _duState.total > 0
+                ? Math.min(100, Math.round((_duState.processed / _duState.total) * 100))
+                : 100;
+            d.progressBar.style.width = pct + '%';
+            d.progressPct.textContent = pct + '%';
+            d.statProcessed.textContent   = _duState.processed.toLocaleString('vi-VN');
+            d.statAssigned.textContent    = _duState.assigned.toLocaleString('vi-VN');
+            d.statUnchanged.textContent   = _duState.unchanged.toLocaleString('vi-VN');
+            d.statNoCandidate.textContent = _duState.noCandidate.toLocaleString('vi-VN');
+
+            if (data.done) { finishDefaultUnitScan(false); return; }
+            runDefaultUnitBatch(parseInt(data.next_offset, 10) || (offset + _duState.batchSize));
+        }).catch(function () {
+            _duState.errors.push('Lô từ dòng ' + (offset + 1) + ': lỗi kết nối.');
+            finishDefaultUnitScan(false);
+        });
+    }
+
+    function finishDefaultUnitScan(stopped) {
+        var d = getDuDom();
+
+        _duState.running = false;
+
+        d.progressBar.classList.remove('progress-bar-animated');
+        if (!stopped) {
+            d.progressBar.style.width = '100%';
+            d.progressPct.textContent = '100%';
+        }
+        d.progressText.textContent = stopped ? 'Đã dừng.' : 'Hoàn tất.';
+
+        d.stopBtn.classList.add('d-none');
+        d.closeBtn.disabled = false;
+
+        d.resultWrap.classList.remove('d-none');
+        if (stopped) {
+            d.resultStopped.classList.remove('d-none');
+        } else {
+            d.resultDone.classList.remove('d-none');
+            d.resultDone.innerHTML = '<i class="bx bx-check-circle me-1"></i>Đã quét <strong>'
+                + _duState.processed.toLocaleString('vi-VN') + '</strong> mã hàng. '
+                + 'Đặt ĐVT chính: <strong>' + _duState.assigned.toLocaleString('vi-VN') + '</strong>, '
+                + 'giữ nguyên: <strong>' + _duState.unchanged.toLocaleString('vi-VN') + '</strong>, '
+                + 'không có ứng viên: <strong>' + _duState.noCandidate.toLocaleString('vi-VN') + '</strong>.';
+        }
+
+        if (_duState.samples.length) {
+            d.samplesWrap.classList.remove('d-none');
+            var html = '';
+            _duState.samples.forEach(function (s) {
+                html += '<tr>' +
+                    '<td><code>' + escHtml(s.sku) + '</code></td>' +
+                    '<td>' + escHtml(s.unit || 'Mặc định') + '</td>' +
+                    '<td>× ' + escHtml(formatRatio(parseFloat(s.ratio))) + '</td>' +
+                    '<td>' + ((s.price !== null && s.price !== undefined)
+                        ? formatPrice(parseFloat(s.price)) + ' ₫' : '—') + '</td>' +
+                    '</tr>';
+            });
+            d.samplesBody.innerHTML = html;
+        }
+
+        if (_duState.errors.length) {
+            d.errorsWrap.classList.remove('d-none');
+            _duState.errors.slice(0, 20).forEach(function (msg) {
+                var li = document.createElement('li');
+                li.textContent = msg;
+                d.errorsUl.appendChild(li);
+            });
+        }
+
+        // Dữ liệu đã đổi → nhắc tải lại bảng tổng, và làm mới panel SKU đang mở
+        markMappingsStale();
+        var sku = dom.cfgSku ? dom.cfgSku.value : '';
+        if (sku) loadConfigsForSku(sku);
+    }
+
+    /* =========================================================================
      * Barcode Scanner
      * ====================================================================== */
     function initScanner() {
@@ -1335,6 +1613,10 @@
             var file = e.target.files && e.target.files[0];
             if (file) { importPriceExcel(file); e.target.value = ''; }
         });
+
+        if (dom.btnUnifyDefaultUnit) {
+            dom.btnUnifyDefaultUnit.addEventListener('click', openDefaultUnitModal);
+        }
     }
 
     /* =========================================================================

@@ -42,6 +42,11 @@ class TGS_HTSoft_Stock_Converter
         add_action('wp_ajax_tgs_htsoft_converter_save_mapping',         [$this, 'ajax_save_mapping']);
         add_action('wp_ajax_tgs_htsoft_converter_delete_mapping',       [$this, 'ajax_delete_mapping']);
 
+        // ── ĐVT bán chính (is_default_unit) ────────────────────────────
+        add_action('wp_ajax_tgs_htsoft_converter_set_default_unit',     [$this, 'ajax_set_default_unit']);
+        add_action('wp_ajax_tgs_htsoft_converter_default_scan_prepare', [$this, 'ajax_default_scan_prepare']);
+        add_action('wp_ajax_tgs_htsoft_converter_default_scan_batch',   [$this, 'ajax_default_scan_batch']);
+
         // ── Bảng tổng ──────────────────────────────────────────────────
         add_action('wp_ajax_tgs_htsoft_converter_list_mappings',        [$this, 'ajax_list_mappings']);
         add_action('wp_ajax_tgs_htsoft_converter_get_mapping',          [$this, 'ajax_get_mapping']);
@@ -213,6 +218,215 @@ class TGS_HTSoft_Stock_Converter
     }
 
     // =========================================================================
+    // ĐVT BÁN CHÍNH (is_default_unit)
+    //
+    // Trong 1 nhóm cùng SKU chỉ có DUY NHẤT 1 dòng is_default_unit = 1.
+    // POS ưu tiên lấy dòng này khi tìm sản phẩm → thêm vào giỏ đúng giá.
+    // =========================================================================
+
+    /** Sai số khi so sánh tỷ lệ quy đổi (DECIMAL(15,3)) */
+    const RATIO_EPS = 0.0005;
+
+    /**
+     * Các DVT bị LOẠI mặc định khi quét tự động (dù có giá).
+     * - Thùng / thung / Thùng_48 …  → hàng bán sỉ, không đưa ra POS mặc định
+     * - kg / Kg_5 / KG …            → đơn vị cân, không đưa ra POS mặc định
+     *
+     * @return string[] danh sách regex chạy trên tên DVT đã bỏ dấu + lowercase
+     */
+    private static function excluded_unit_patterns()
+    {
+        return apply_filters('tgs_htsoft_converter_excluded_default_units', [
+            '/thung/',                       // thùng, thung, thùng_48, 1thung…
+            '/(^|[^a-z0-9])kg([^a-z]|$)/',   // kg, kg_5, _kg, "kg 10"
+        ]);
+    }
+
+    /**
+     * Bỏ dấu tiếng Việt + lowercase để so khớp tên DVT.
+     */
+    private static function normalize_unit($unit)
+    {
+        $unit = mb_strtolower(trim((string) $unit), 'UTF-8');
+
+        $map = [
+            'à','á','ạ','ả','ã','â','ầ','ấ','ậ','ẩ','ẫ','ă','ằ','ắ','ặ','ẳ','ẵ',
+            'è','é','ẹ','ẻ','ẽ','ê','ề','ế','ệ','ể','ễ',
+            'ì','í','ị','ỉ','ĩ',
+            'ò','ó','ọ','ỏ','õ','ô','ồ','ố','ộ','ổ','ỗ','ơ','ờ','ớ','ợ','ở','ỡ',
+            'ù','ú','ụ','ủ','ũ','ư','ừ','ứ','ự','ử','ữ',
+            'ỳ','ý','ỵ','ỷ','ỹ','đ',
+        ];
+        $plain = [
+            'a','a','a','a','a','a','a','a','a','a','a','a','a','a','a','a','a',
+            'e','e','e','e','e','e','e','e','e','e','e',
+            'i','i','i','i','i',
+            'o','o','o','o','o','o','o','o','o','o','o','o','o','o','o','o','o',
+            'u','u','u','u','u','u','u','u','u','u','u',
+            'y','y','y','y','y','d',
+        ];
+
+        return str_replace($map, $plain, $unit);
+    }
+
+    /**
+     * DVT này có nằm trong danh sách loại trừ mặc định không?
+     */
+    private static function is_excluded_unit($unit)
+    {
+        $norm = self::normalize_unit($unit);
+        if ($norm === '') {
+            return false;
+        }
+        foreach (self::excluded_unit_patterns() as $pattern) {
+            if (preg_match($pattern, $norm)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Chọn dòng cấu hình sẽ làm ĐVT bán chính cho 1 SKU.
+     *
+     * Thứ tự ưu tiên (chỉ xét DVT KHÔNG bị loại trừ):
+     *   1. Tỷ lệ > 1 và CÓ giá   → lấy tỷ lệ nhỏ nhất (gần 1 nhất)
+     *   2. Tỷ lệ = 1 và CÓ giá
+     *   3. Tỷ lệ = 1 (không cần giá)
+     *   4. Tỷ lệ > 1 (không có giá) → lấy tỷ lệ nhỏ nhất
+     *   → Không có ứng viên nào hợp lệ: trả về null (SKU đó không có ĐVT chính).
+     *
+     * VD: SKU có tỷ lệ 1, 3, 6, 8 → chọn 3. Nếu 3 chưa có giá → chọn 6…
+     *
+     * @param array $rows Các dòng cấu hình ĐANG hoạt động của 1 SKU
+     * @return array|null Dòng được chọn
+     */
+    private static function pick_default_config($rows)
+    {
+        $bigger_priced  = [];
+        $bigger_any     = [];
+        $one_priced     = [];
+        $one_any        = [];
+
+        foreach ($rows as $row) {
+            if (self::is_excluded_unit($row['convert_unit'] ?? '')) {
+                continue;
+            }
+
+            $ratio = (float) ($row['convert_to_htsoft'] ?? 1);
+            if ($ratio <= 0) {
+                continue;
+            }
+
+            $has_price = ($row['unit_price'] !== null && $row['unit_price'] !== '' && (float) $row['unit_price'] > 0);
+
+            if ($ratio > 1 + self::RATIO_EPS) {
+                $bigger_any[] = $row;
+                if ($has_price) {
+                    $bigger_priced[] = $row;
+                }
+            } else {
+                // Tỷ lệ = 1 (hoặc < 1 hiếm gặp) — nhóm "đơn vị nhỏ nhất"
+                $one_any[] = $row;
+                if ($has_price) {
+                    $one_priced[] = $row;
+                }
+            }
+        }
+
+        // Sắp xếp: tỷ lệ nhỏ nhất trước, cùng tỷ lệ thì lấy dòng tạo trước
+        $sort_by_ratio = function (&$list) {
+            usort($list, function ($a, $b) {
+                $ra = (float) $a['convert_to_htsoft'];
+                $rb = (float) $b['convert_to_htsoft'];
+                if (abs($ra - $rb) > self::RATIO_EPS) {
+                    return ($ra < $rb) ? -1 : 1;
+                }
+                return ((int) $a['global_htsoft_stock_convert_id']) <=> ((int) $b['global_htsoft_stock_convert_id']);
+            });
+        };
+
+        $sort_by_id = function (&$list) {
+            usort($list, function ($a, $b) {
+                return ((int) $a['global_htsoft_stock_convert_id']) <=> ((int) $b['global_htsoft_stock_convert_id']);
+            });
+        };
+
+        $sort_by_ratio($bigger_priced);
+        $sort_by_ratio($bigger_any);
+        $sort_by_id($one_priced);
+        $sort_by_id($one_any);
+
+        if (!empty($bigger_priced)) { return $bigger_priced[0]; }
+        if (!empty($one_priced))    { return $one_priced[0]; }
+        if (!empty($one_any))       { return $one_any[0]; }
+        if (!empty($bigger_any))    { return $bigger_any[0]; }
+
+        return null;
+    }
+
+    /**
+     * Đặt 1 dòng làm ĐVT bán chính của SKU, mọi dòng còn lại về 0.
+     *
+     * @param string   $sku
+     * @param int|null $winner_id ID dòng được chọn (null = xoá hết cờ của SKU)
+     * @return int Số dòng thực sự bị thay đổi
+     */
+    private static function apply_default_for_sku($sku, $winner_id)
+    {
+        global $wpdb;
+
+        $table = self::table_mapping();
+        $now   = current_time('mysql');
+        $touch = 0;
+
+        // Hạ cờ tất cả dòng khác của SKU (kể cả dòng đã xoá mềm)
+        $cleared = $wpdb->query($wpdb->prepare(
+            "UPDATE {$table}
+             SET is_default_unit = 0, updated_at = %s
+             WHERE BINARY global_product_sku = %s
+               AND is_default_unit <> 0
+               AND global_htsoft_stock_convert_id <> %d",
+            $now,
+            $sku,
+            (int) $winner_id
+        ));
+        $touch += max(0, (int) $cleared);
+
+        if ($winner_id) {
+            $set = $wpdb->query($wpdb->prepare(
+                "UPDATE {$table}
+                 SET is_default_unit = 1, updated_at = %s
+                 WHERE global_htsoft_stock_convert_id = %d
+                   AND is_default_unit <> 1",
+                $now,
+                (int) $winner_id
+            ));
+            $touch += max(0, (int) $set);
+        }
+
+        return $touch;
+    }
+
+    /**
+     * Lấy toàn bộ dòng cấu hình đang hoạt động của 1 SKU (dùng cho việc chọn lại ĐVT chính).
+     */
+    private static function fetch_active_configs($sku)
+    {
+        global $wpdb;
+
+        $table = self::table_mapping();
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT global_htsoft_stock_convert_id, convert_unit, convert_to_htsoft, unit_price, is_default_unit
+             FROM {$table}
+             WHERE BINARY global_product_sku = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_htsoft_stock_convert_id ASC",
+            $sku
+        ), ARRAY_A) ?: [];
+    }
+
+    // =========================================================================
     // AJAX: Tìm kiếm sản phẩm (có config_count)
     // =========================================================================
 
@@ -314,6 +528,7 @@ class TGS_HTSoft_Stock_Converter
                 convert_note,
                 unit_price,
                 unit_weight_kg,
+                is_default_unit,
                 updated_at
              FROM {$mapping_table}
              WHERE BINARY global_product_sku = %s
@@ -364,6 +579,9 @@ class TGS_HTSoft_Stock_Converter
         // Khối lượng kg của 1 DVT (tuỳ chọn, NULL nếu để trống)
         $unit_weight_kg = self::parse_optional_decimal($_POST['unit_weight_kg'] ?? '');
 
+        // ĐVT bán chính — 1 SKU chỉ có duy nhất 1 dòng = 1
+        $is_default_unit = !empty($_POST['is_default_unit']) ? 1 : 0;
+
         if ($sku === '') {
             self::error('Thiếu SKU sản phẩm.');
             return;
@@ -388,6 +606,7 @@ class TGS_HTSoft_Stock_Converter
             'convert_note'       => $note,
             'unit_price'         => $unit_price,
             'unit_weight_kg'     => $unit_weight_kg,
+            'is_default_unit'    => $is_default_unit,
             'user_id'            => $user_id,
             'is_deleted'         => 0,
             'deleted_at'         => null,
@@ -401,6 +620,7 @@ class TGS_HTSoft_Stock_Converter
             '%s',
             $unit_price !== null ? '%f' : '%s',
             $unit_weight_kg !== null ? '%f' : '%s',
+            '%d',
             '%d',
             '%d',
             '%s',
@@ -440,6 +660,11 @@ class TGS_HTSoft_Stock_Converter
                 return;
             }
 
+            // Chọn làm ĐVT bán chính → hạ cờ mọi DVT khác của SKU
+            if ($is_default_unit === 1) {
+                self::apply_default_for_sku($sku, $id);
+            }
+
             self::success(['id' => $id], 'Đã cập nhật cấu hình DVT "' . $unit . '".');
             return;
         }
@@ -477,6 +702,9 @@ class TGS_HTSoft_Stock_Converter
                 $formats,
                 ['%d']
             );
+            if ($is_default_unit === 1) {
+                self::apply_default_for_sku($sku, (int) $existing_id);
+            }
             self::success(['id' => (int) $existing_id], 'Đã khôi phục và cập nhật cấu hình DVT "' . $unit . '".');
             return;
         }
@@ -493,7 +721,12 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
-        self::success(['id' => (int) $wpdb->insert_id], 'Đã tạo cấu hình DVT "' . $unit . '".');
+        $new_id = (int) $wpdb->insert_id;
+        if ($is_default_unit === 1) {
+            self::apply_default_for_sku($sku, $new_id);
+        }
+
+        self::success(['id' => $new_id], 'Đã tạo cấu hình DVT "' . $unit . '".');
     }
 
     // =========================================================================
@@ -513,6 +746,14 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
+        // Ghi nhớ SKU + có phải ĐVT bán chính không, để chọn lại sau khi xóa
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_product_sku, is_default_unit
+             FROM " . self::table_mapping() . "
+             WHERE global_htsoft_stock_convert_id = %d",
+            $id
+        ), ARRAY_A);
+
         $deleted = $wpdb->delete(
             self::table_mapping(),
             ['global_htsoft_stock_convert_id' => $id],
@@ -524,7 +765,259 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
-        self::success(['id' => $id], 'Đã xóa cấu hình.');
+        // Xóa đúng ĐVT bán chính → tự chọn lại DVT khác để POS luôn có mặc định
+        $new_default_id = 0;
+        if ($row && (int) $row['is_default_unit'] === 1) {
+            $sku    = (string) $row['global_product_sku'];
+            $winner = self::pick_default_config(self::fetch_active_configs($sku));
+            if ($winner) {
+                $new_default_id = (int) $winner['global_htsoft_stock_convert_id'];
+                self::apply_default_for_sku($sku, $new_default_id);
+            }
+        }
+
+        self::success(
+            ['id' => $id, 'new_default_id' => $new_default_id],
+            $new_default_id ? 'Đã xóa cấu hình và chọn lại ĐVT bán chính.' : 'Đã xóa cấu hình.'
+        );
+    }
+
+    // =========================================================================
+    // AJAX: Đặt 1 cấu hình làm ĐVT bán chính (các DVT khác cùng SKU về 0)
+    // =========================================================================
+
+    public function ajax_set_default_unit()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        if ($id <= 0) {
+            self::error('ID không hợp lệ.');
+            return;
+        }
+
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_product_sku, convert_unit
+             FROM " . self::table_mapping() . "
+             WHERE global_htsoft_stock_convert_id = %d
+               AND (is_deleted = 0 OR is_deleted IS NULL)",
+            $id
+        ), ARRAY_A);
+
+        if (!$row) {
+            self::error('Không tìm thấy cấu hình.');
+            return;
+        }
+
+        self::apply_default_for_sku((string) $row['global_product_sku'], $id);
+
+        $label = ($row['convert_unit'] !== '') ? $row['convert_unit'] : 'Mặc định';
+        self::success(
+            ['id' => $id, 'global_product_sku' => $row['global_product_sku']],
+            'Đã đặt "' . $label . '" làm ĐVT bán chính.'
+        );
+    }
+
+    // =========================================================================
+    // AJAX: Quét & thống nhất ĐVT bán chính toàn hệ thống
+    //
+    // Chạy theo batch (mỗi request xử lý N mã hàng) để không timeout với 20k+ dòng.
+    //  - prepare: đếm tổng số SKU cần quét
+    //  - batch:   xử lý 1 lô SKU theo offset, trả về thống kê
+    // =========================================================================
+
+    /** Số SKU xử lý trong 1 request quét */
+    const DEFAULT_SCAN_BATCH_SIZE = 200;
+    const DEFAULT_SCAN_BATCH_MAX  = 500;
+
+    public function ajax_default_scan_prepare()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $table = self::table_mapping();
+        $total = (int) $wpdb->get_var(
+            "SELECT COUNT(DISTINCT global_product_sku)
+             FROM {$table}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        );
+
+        self::success([
+            'total_skus' => $total,
+            'batch_size' => self::DEFAULT_SCAN_BATCH_SIZE,
+        ]);
+    }
+
+    public function ajax_default_scan_batch()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $table  = self::table_mapping();
+        $offset = isset($_POST['offset']) ? max(0, (int) $_POST['offset']) : 0;
+
+        $limit = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : self::DEFAULT_SCAN_BATCH_SIZE;
+        if ($limit < 10) {
+            $limit = self::DEFAULT_SCAN_BATCH_SIZE;
+        }
+        if ($limit > self::DEFAULT_SCAN_BATCH_MAX) {
+            $limit = self::DEFAULT_SCAN_BATCH_MAX;
+        }
+
+        // 1 = chỉ xử lý SKU chưa có ĐVT chính; 0 = tính lại toàn bộ
+        $only_missing = !empty($_POST['only_missing']);
+
+        // ── Lấy 1 lô SKU (thứ tự cố định → phân trang ổn định giữa các batch) ──
+        $skus = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT global_product_sku
+             FROM {$table}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_product_sku ASC
+             LIMIT %d OFFSET %d",
+            $limit,
+            $offset
+        ));
+
+        if (empty($skus)) {
+            self::success([
+                'processed'    => 0,
+                'assigned'     => 0,
+                'unchanged'    => 0,
+                'no_candidate' => 0,
+                'next_offset'  => $offset,
+                'done'         => true,
+                'samples'      => [],
+            ]);
+            return;
+        }
+
+        // ── Lấy toàn bộ dòng của các SKU trong lô (1 query) ────────────────
+        $placeholders = implode(',', array_fill(0, count($skus), '%s'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT global_htsoft_stock_convert_id, global_product_sku, convert_unit,
+                    convert_to_htsoft, unit_price, is_default_unit, is_deleted
+             FROM {$table}
+             WHERE global_product_sku IN ({$placeholders})
+             ORDER BY global_htsoft_stock_convert_id ASC",
+            ...$skus
+        ), ARRAY_A) ?: [];
+
+        $groups = [];
+        foreach ($rows as $r) {
+            $groups[(string) $r['global_product_sku']][] = $r;
+        }
+
+        $assigned     = 0;
+        $unchanged    = 0;
+        $no_candidate = 0;
+        $ids_set_one  = [];
+        $ids_set_zero = [];
+        $samples      = [];
+
+        foreach ($skus as $sku) {
+            $sku      = (string) $sku;
+            $all_rows = $groups[$sku] ?? [];
+
+            $active = array_values(array_filter($all_rows, function ($r) {
+                return ((int) $r['is_deleted']) === 0 || $r['is_deleted'] === null;
+            }));
+
+            $current_default_ids = [];
+            foreach ($all_rows as $r) {
+                if ((int) $r['is_default_unit'] === 1) {
+                    $current_default_ids[] = (int) $r['global_htsoft_stock_convert_id'];
+                }
+            }
+
+            // Chỉ bù SKU thiếu: đã có đúng 1 cờ hợp lệ thì bỏ qua
+            if ($only_missing && count($current_default_ids) === 1) {
+                $keep_id = $current_default_ids[0];
+                $still_active = false;
+                foreach ($active as $r) {
+                    if ((int) $r['global_htsoft_stock_convert_id'] === $keep_id) {
+                        $still_active = true;
+                        break;
+                    }
+                }
+                if ($still_active) {
+                    $unchanged++;
+                    continue;
+                }
+            }
+
+            $winner    = self::pick_default_config($active);
+            $winner_id = $winner ? (int) $winner['global_htsoft_stock_convert_id'] : 0;
+
+            if (!$winner_id) {
+                $no_candidate++;
+            }
+
+            // Dòng cần hạ cờ: mọi dòng đang = 1 nhưng không phải dòng thắng
+            foreach ($current_default_ids as $cid) {
+                if ($cid !== $winner_id) {
+                    $ids_set_zero[] = $cid;
+                }
+            }
+
+            if ($winner_id) {
+                if (in_array($winner_id, $current_default_ids, true) && count($current_default_ids) === 1) {
+                    $unchanged++;
+                } else {
+                    $ids_set_one[] = $winner_id;
+                    $assigned++;
+                    if (count($samples) < 20) {
+                        $samples[] = [
+                            'sku'   => $sku,
+                            'unit'  => (string) $winner['convert_unit'],
+                            'ratio' => (float) $winner['convert_to_htsoft'],
+                            'price' => ($winner['unit_price'] !== null && $winner['unit_price'] !== '')
+                                        ? (float) $winner['unit_price'] : null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // ── Ghi DB: 2 query gộp cho cả lô ──────────────────────────────────
+        $now = current_time('mysql');
+
+        if (!empty($ids_set_zero)) {
+            $in = implode(',', array_map('intval', $ids_set_zero));
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$table} SET is_default_unit = 0, updated_at = %s
+                 WHERE global_htsoft_stock_convert_id IN ({$in})",
+                $now
+            ));
+        }
+
+        if (!empty($ids_set_one)) {
+            $in = implode(',', array_map('intval', $ids_set_one));
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$table} SET is_default_unit = 1, updated_at = %s
+                 WHERE global_htsoft_stock_convert_id IN ({$in})",
+                $now
+            ));
+        }
+
+        $processed = count($skus);
+
+        self::success([
+            'processed'    => $processed,
+            'assigned'     => $assigned,
+            'unchanged'    => $unchanged,
+            'no_candidate' => $no_candidate,
+            'cleared'      => count($ids_set_zero),
+            'next_offset'  => $offset + $processed,
+            'done'         => ($processed < $limit),
+            'samples'      => $samples,
+        ]);
     }
 
     // =========================================================================
@@ -622,6 +1115,7 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_note,
                 m.unit_price,
                 m.unit_weight_kg,
+                m.is_default_unit,
                 m.updated_at
              FROM {$mapping_table} m
              WHERE {$where}
@@ -770,7 +1264,8 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
-                m.unit_weight_kg
+                m.unit_weight_kg,
+                m.is_default_unit
              FROM {$mapping_table} m
              WHERE m.global_htsoft_stock_convert_id = %d
                AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
@@ -810,11 +1305,12 @@ class TGS_HTSoft_Stock_Converter
         $mapping_table = self::table_mapping();
         $sql = $wpdb->prepare(
             "SELECT global_htsoft_stock_convert_id, global_product_sku, convert_unit,
-                    convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg, updated_at
+                    convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg,
+                    is_default_unit, updated_at
              FROM {$mapping_table}
              WHERE BINARY global_product_sku = %s
                AND (is_deleted = 0 OR is_deleted IS NULL)
-             ORDER BY convert_unit ASC
+             ORDER BY is_default_unit DESC, convert_unit ASC
              LIMIT 1",
             $sku
         );
@@ -855,7 +1351,7 @@ class TGS_HTSoft_Stock_Converter
 
         $mapping_table = self::table_mapping();
         $placeholders  = implode(',', array_fill(0, count($skus), '%s'));
-        $sql = "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg
+        $sql = "SELECT global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft, convert_note, unit_price, unit_weight_kg, is_default_unit
                 FROM {$mapping_table}
                 WHERE (is_deleted = 0 OR is_deleted IS NULL)
                   AND global_product_sku IN ({$placeholders})";
@@ -878,6 +1374,7 @@ class TGS_HTSoft_Stock_Converter
                     'convert_note'      => (string) ($row['convert_note']     ?? ''),
                     'unit_price'        => ($row['unit_price'] !== null && $row['unit_price'] !== '') ? (float) $row['unit_price'] : null,
                     'unit_weight_kg'    => ($row['unit_weight_kg'] !== null && $row['unit_weight_kg'] !== '') ? (float) $row['unit_weight_kg'] : null,
+                    'is_default_unit'   => ((int) ($row['is_default_unit'] ?? 0) === 1) ? 1 : 0,
                 ];
             }
         }
@@ -908,7 +1405,8 @@ class TGS_HTSoft_Stock_Converter
                 m.convert_to_htsoft,
                 m.convert_note,
                 m.unit_price,
-                m.unit_weight_kg
+                m.unit_weight_kg,
+                m.is_default_unit
              FROM {$mapping_table} m
              WHERE (m.is_deleted = 0 OR m.is_deleted IS NULL)
              ORDER BY m.global_product_sku ASC, m.convert_unit ASC",
@@ -936,6 +1434,7 @@ class TGS_HTSoft_Stock_Converter
                 'convert_note'       => (string) ($row['convert_note'] ?? ''),
                 'unit_price'         => $price,
                 'unit_weight_kg'     => $weight,
+                'is_default_unit'    => ((int) ($row['is_default_unit'] ?? 0) === 1) ? 1 : 0,
             ];
         }
 

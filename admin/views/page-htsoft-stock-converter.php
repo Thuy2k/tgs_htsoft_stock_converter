@@ -184,6 +184,16 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                                min="0" step="0.001" placeholder="2.3">
                                         <div class="form-text">Tuỳ chọn</div>
                                     </div>
+                                    <div class="col-12 col-md-3">
+                                        <label class="form-label fw-semibold d-block">ĐVT bán chính</label>
+                                        <div class="form-check form-switch mt-1">
+                                            <input class="form-check-input" type="checkbox" id="cfgIsDefaultUnit">
+                                            <label class="form-check-label small" for="cfgIsDefaultUnit">
+                                                Ưu tiên tại POS
+                                            </label>
+                                        </div>
+                                        <div class="form-text">Mỗi mã hàng chỉ 1 ĐVT chính</div>
+                                    </div>
                                 </div>
 
                                 <div class="mt-4 d-flex gap-2 flex-wrap">
@@ -230,6 +240,9 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                 <i class="bx bx-dollar me-1"></i>Import Giá
                             </button>
                             <input type="file" id="priceImportFile" accept=".xlsx,.xls" class="d-none">
+                            <button class="btn btn-sm btn-dark" type="button" id="btnUnifyDefaultUnit">
+                                <i class="bx bx-check-double me-1"></i>Thống nhất ĐVT bán chính
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -248,6 +261,14 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                         <div>
                             <strong>Import Giá:</strong>
                             <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Giá bán (tự suy giá cho DVT thiếu)</span>
+                        </div>
+                    </div>
+                    <div class="tgs-guide-item">
+                        <i class="bx bx-check-double text-dark"></i>
+                        <div>
+                            <strong>Thống nhất ĐVT bán chính:</strong>
+                            <span class="text-muted">Quét toàn bộ, mỗi mã hàng chọn 1 ĐVT ưu tiên cho POS —
+                                tỷ lệ &gt; 1 gần nhất và có giá, bỏ qua Thùng / kg, không có thì quay về tỷ lệ 1</span>
                         </div>
                     </div>
                 </div>
@@ -360,6 +381,126 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     <i class="bx bx-stop-circle me-1"></i>Dừng lại
                 </button>
                 <button type="button" class="btn btn-secondary" id="eiCloseBtn">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =====================================================================
+     Modal: Thống nhất ĐVT bán chính (quét toàn bộ)
+     ===================================================================== -->
+<div class="modal fade" id="defaultUnitModal" tabindex="-1"
+     data-bs-backdrop="static" data-bs-keyboard="false"
+     aria-labelledby="defaultUnitModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title" id="defaultUnitModalLabel">
+                    <i class="bx bx-check-double me-2"></i>Thống nhất ĐVT bán chính
+                </h5>
+            </div>
+            <div class="modal-body">
+
+                <!-- Bước 1: xác nhận + tuỳ chọn -->
+                <div id="duIntro">
+                    <div class="alert alert-secondary py-2 small mb-3">
+                        <div class="fw-semibold mb-1"><i class="bx bx-list-check me-1"></i>Quy tắc chọn ĐVT bán chính cho mỗi mã hàng:</div>
+                        <ol class="mb-0 ps-3">
+                            <li>Ưu tiên tỷ lệ quy đổi <strong>&gt; 1 gần nhất</strong> và <strong>có giá bán</strong>
+                                (VD: có 1, 3, 6, 8 → chọn 3; nếu 3 chưa có giá → xét 6…)</li>
+                            <li>Loại bỏ mặc định các ĐVT chứa <strong>Thùng / thung</strong> và <strong>kg / kg_</strong> (kể cả khi có giá)</li>
+                            <li>Không có ứng viên phù hợp → quay về ĐVT có <strong>tỷ lệ = 1</strong> (ưu tiên loại có giá)</li>
+                            <li>Mỗi mã hàng chỉ <strong>1 dòng = 1</strong>, các dòng còn lại được đặt về 0</li>
+                        </ol>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="duOnlyMissing">
+                        <label class="form-check-label" for="duOnlyMissing">
+                            Chỉ xử lý mã hàng <strong>chưa có</strong> ĐVT bán chính
+                            <span class="text-muted small d-block">Bỏ trống = quét lại toàn bộ, ghi đè lựa chọn cũ</span>
+                        </label>
+                    </div>
+                    <div class="small text-muted" id="duTotalInfo"></div>
+                </div>
+
+                <!-- Bước 2: tiến độ -->
+                <div id="duProgressWrap" class="d-none">
+                    <div class="d-flex justify-content-between mb-1 small">
+                        <span id="duProgressText" class="text-muted">Đang chuẩn bị…</span>
+                        <span id="duProgressPct" class="fw-semibold">0%</span>
+                    </div>
+                    <div class="progress mb-3" style="height:20px; border-radius:6px;">
+                        <div id="duProgressBar"
+                             class="progress-bar progress-bar-striped progress-bar-animated bg-dark"
+                             role="progressbar" style="width:0%; transition:width .3s ease;"></div>
+                    </div>
+                    <div class="row g-2 text-center mb-2">
+                        <div class="col-3">
+                            <div class="border rounded py-2">
+                                <div class="fs-5 fw-bold text-dark" id="duStatProcessed">0</div>
+                                <div class="small text-muted">Mã hàng đã quét</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded py-2">
+                                <div class="fs-5 fw-bold text-success" id="duStatAssigned">0</div>
+                                <div class="small text-muted">Đã đặt ĐVT chính</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded py-2">
+                                <div class="fs-5 fw-bold text-secondary" id="duStatUnchanged">0</div>
+                                <div class="small text-muted">Giữ nguyên</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded py-2">
+                                <div class="fs-5 fw-bold text-warning" id="duStatNoCandidate">0</div>
+                                <div class="small text-muted">Không có ứng viên</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bước 3: kết quả -->
+                <div id="duResultWrap" class="d-none">
+                    <div class="alert alert-success py-2 d-none" id="duResultDone"></div>
+                    <div class="alert alert-warning py-2 d-none" id="duResultStopped">
+                        <i class="bx bx-stop-circle me-1"></i>Đã dừng theo yêu cầu. Các mã hàng đã quét vẫn được lưu.
+                    </div>
+                    <div id="duSamplesWrap" class="d-none">
+                        <div class="small fw-semibold text-muted mb-1">
+                            <i class="bx bx-detail me-1"></i>Ví dụ các mã hàng vừa được gán:
+                        </div>
+                        <div style="max-height:240px; overflow-y:auto;">
+                            <table class="table table-sm table-bordered small mb-0" style="font-size:.8rem;">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Mã hàng</th>
+                                        <th>ĐVT chính</th>
+                                        <th>Tỷ lệ</th>
+                                        <th>Giá bán</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="duSamplesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="duErrorsWrap" class="d-none mt-2">
+                        <div class="text-danger small mb-1"><i class="bx bx-error me-1"></i>Lỗi:</div>
+                        <ul class="list-unstyled small text-danger ps-2 mb-0" id="duErrorsUl"></ul>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-dark" id="duStartBtn">
+                    <i class="bx bx-play me-1"></i>Bắt đầu quét
+                </button>
+                <button type="button" class="btn btn-danger d-none" id="duStopBtn">
+                    <i class="bx bx-stop-circle me-1"></i>Dừng lại
+                </button>
+                <button type="button" class="btn btn-secondary" id="duCloseBtn">Đóng</button>
             </div>
         </div>
     </div>
