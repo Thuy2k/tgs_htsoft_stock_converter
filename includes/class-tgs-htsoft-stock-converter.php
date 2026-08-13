@@ -443,9 +443,8 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
-        $table         = self::table_product();
-        $mapping_table = self::table_mapping();
-        $like          = '%' . $wpdb->esc_like($keyword) . '%';
+        $table = self::table_product();
+        $like  = '%' . $wpdb->esc_like($keyword) . '%';
 
         $tokens = preg_split('/\s+/u', trim($keyword));
         $tokens = array_values(array_filter(array_map('trim', (array) $tokens), function ($t) {
@@ -467,17 +466,20 @@ class TGS_HTSoft_Stock_Converter
         }
         $name_where = implode(' AND ', $name_conditions);
 
+        // ── B1: Tìm sản phẩm (KHÔNG join bảng quy đổi) ─────────────────────
+        //
+        // Trước đây câu này LEFT JOIN bảng quy đổi bằng `BINARY m.sku = p.sku`
+        // để đếm config_count. BINARY chặn index → mỗi dòng sản phẩm quét full
+        // bảng quy đổi 20k dòng ⇒ 1 lần tìm mất ~20 GIÂY, gõ vài ký tự là treo
+        // trang. Tách làm 2 query: lọc 30 sản phẩm trước (~0.13s), rồi đếm cấu
+        // hình đúng 30 SKU đó qua IN(...) dùng được index (~0.01s).
         $sql = "SELECT
                     p.global_product_name AS local_product_name,
                     p.global_product_sku AS local_product_sku,
                     p.global_product_barcode_main AS local_product_barcode_main,
                     p.global_product_unit AS local_product_unit,
-                    0 AS local_product_quantity_no_tracking,
-                    COUNT(m.global_htsoft_stock_convert_id) AS config_count
+                    0 AS local_product_quantity_no_tracking
                 FROM {$table} p
-                LEFT JOIN {$mapping_table} m
-                    ON BINARY m.global_product_sku = p.global_product_sku
-                   AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
                 WHERE (p.is_deleted = 0 OR p.is_deleted IS NULL)
                   AND (p.global_product_is_tracking = 0 OR p.global_product_is_tracking IS NULL)
                   AND (
@@ -485,7 +487,6 @@ class TGS_HTSoft_Stock_Converter
                     OR p.global_product_barcode_main LIKE %s
                     OR p.global_product_sku LIKE %s
                   )
-                GROUP BY p.global_product_sku
                 ORDER BY p.global_product_name ASC
                 LIMIT 30";
 
@@ -493,8 +494,65 @@ class TGS_HTSoft_Stock_Converter
         $values[] = $like;
 
         $sql  = $wpdb->prepare($sql, ...$values);
-        $rows = $wpdb->get_results($sql, ARRAY_A);
-        self::success(['products' => $rows ?: []]);
+        $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
+
+        // ── B2: Đếm số cấu hình DVT cho đúng các SKU vừa tìm được ──────────
+        $rows = self::attach_config_count($rows);
+
+        self::success(['products' => $rows]);
+    }
+
+    /**
+     * Gắn config_count (số DVT đã cấu hình) cho danh sách sản phẩm.
+     * Dùng IN(...) trên cột có UNIQUE KEY thay cho LEFT JOIN + BINARY.
+     *
+     * @param array $rows Mỗi phần tử có key local_product_sku
+     * @return array
+     */
+    private static function attach_config_count($rows)
+    {
+        if (empty($rows)) {
+            return [];
+        }
+
+        global $wpdb;
+
+        $skus = [];
+        foreach ($rows as $row) {
+            $sku = (string) ($row['local_product_sku'] ?? '');
+            if ($sku !== '') {
+                $skus[$sku] = true;
+            }
+        }
+        $skus = array_keys($skus);
+
+        $counts = [];
+        if (!empty($skus)) {
+            $mapping_table = self::table_mapping();
+            $placeholders  = implode(',', array_fill(0, count($skus), '%s'));
+
+            // Cột global_product_sku dùng collation utf8mb4_bin → so khớp
+            // phân biệt hoa/thường y hệt BINARY nhưng vẫn dùng được index.
+            $sql = "SELECT global_product_sku, COUNT(*) AS config_count
+                    FROM {$mapping_table}
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                      AND global_product_sku IN ({$placeholders})
+                    GROUP BY global_product_sku";
+
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $found = $wpdb->get_results($wpdb->prepare($sql, ...$skus), ARRAY_A) ?: [];
+            foreach ($found as $f) {
+                $counts[(string) $f['global_product_sku']] = (int) $f['config_count'];
+            }
+        }
+
+        foreach ($rows as &$row) {
+            $sku = (string) ($row['local_product_sku'] ?? '');
+            $row['config_count'] = $counts[$sku] ?? 0;
+        }
+        unset($row);
+
+        return $rows;
     }
 
     // =========================================================================

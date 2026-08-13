@@ -14,6 +14,8 @@
         scanner:            null,
         scannerCooldownAt:  0,
         searchTimer:        null,
+        searchAbort:        null,   // AbortController của request tìm kiếm đang chạy
+        searchReqId:        0,      // số thứ tự request → bỏ qua kết quả về trễ
         mappingSearchTimer: null,
         selectedProduct:    null,
 
@@ -95,15 +97,16 @@
     /* =========================================================================
      * AJAX helper
      * ====================================================================== */
-    function postAjax(action, payload) {
+    function postAjax(action, payload, opts) {
         const body = new URLSearchParams();
         body.append('action', action);
         body.append('nonce', CFG.nonce || '');
         for (const [k, v] of Object.entries(payload || {})) {
             body.append(k, v);
         }
-        return fetch(CFG.ajaxUrl, { method: 'POST', body })
-            .then((r) => r.json());
+        const init = { method: 'POST', body };
+        if (opts && opts.signal) { init.signal = opts.signal; }
+        return fetch(CFG.ajaxUrl, init).then((r) => r.json());
     }
 
     function toast(msg, type) {
@@ -137,14 +140,39 @@
      * ====================================================================== */
     function searchProducts() {
         var kw = (dom.cfgSearchKeyword ? dom.cfgSearchKeyword.value : '').trim();
+
+        // Huỷ request đang chạy — tránh xếp hàng nhiều request nặng và
+        // tránh kết quả cũ về sau đè lên kết quả của từ khoá mới.
+        if (state.searchAbort) {
+            state.searchAbort.abort();
+            state.searchAbort = null;
+        }
+
         if (!kw) { renderSearchResults([]); return; }
 
-        postAjax('tgs_htsoft_converter_search_products', { keyword: kw })
+        var reqId = ++state.searchReqId;
+        var ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        state.searchAbort = ctrl;
+
+        if (dom.cfgSearchResults) {
+            dom.cfgSearchResults.innerHTML =
+                '<div class="text-muted small text-center py-3">'
+                + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tìm…</div>';
+        }
+
+        postAjax('tgs_htsoft_converter_search_products', { keyword: kw },
+                 ctrl ? { signal: ctrl.signal } : null)
             .then(function (res) {
-                if (res.success) renderSearchResults(res.data.products || []);
-                else renderSearchResults([]);
+                if (reqId !== state.searchReqId) return;   // đã có request mới hơn
+                state.searchAbort = null;
+                renderSearchResults((res && res.success) ? (res.data.products || []) : []);
             })
-            .catch(function () { renderSearchResults([]); });
+            .catch(function (err) {
+                if (err && err.name === 'AbortError') return;
+                if (reqId !== state.searchReqId) return;
+                state.searchAbort = null;
+                renderSearchResults([]);
+            });
     }
 
     function renderSearchResults(products) {
@@ -1548,7 +1576,10 @@
         if (dom.cfgSearchKeyword) {
             dom.cfgSearchKeyword.addEventListener('input', function () {
                 clearTimeout(state.searchTimer);
-                state.searchTimer = setTimeout(searchProducts, 350);
+                // 1 ký tự khớp gần như toàn bộ 19k sản phẩm → chờ tối thiểu 2 ký tự
+                var kw = dom.cfgSearchKeyword.value.trim();
+                if (kw.length === 1) { return; }
+                state.searchTimer = setTimeout(searchProducts, 400);
             });
             dom.cfgSearchKeyword.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { clearTimeout(state.searchTimer); searchProducts(); }
