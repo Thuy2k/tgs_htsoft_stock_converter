@@ -641,9 +641,34 @@
           .finally(function () { if (btn) btn.disabled = false; });
     }
 
+    var _addUnitModal = null;
+    function getAddUnitModal() {
+        if (!_addUnitModal) {
+            var m = document.getElementById('addUnitModal');
+            if (m) _addUnitModal = new bootstrap.Modal(m);
+        }
+        return _addUnitModal;
+    }
+    function openAddUnitModal() {
+        if (state.mode !== 'base') return;
+        state.selectedProduct = null;
+        if (dom.cfgSku) dom.cfgSku.value = '';
+        if (dom.cfgEmptyState) dom.cfgEmptyState.style.display = '';
+        if (dom.cfgContent) dom.cfgContent.style.display = 'none';
+        if (dom.cfgSearchKeyword) dom.cfgSearchKeyword.value = '';
+        renderSearchResults([]);
+        resetUnitForm();
+        var m = getAddUnitModal();
+        if (m) m.show();
+        setTimeout(function () { if (dom.cfgSearchKeyword) dom.cfgSearchKeyword.focus(); }, 300);
+    }
+
     function bindPriceListEvents() {
         var btnOpenBase = el('btnOpenBase');
         if (btnOpenBase) btnOpenBase.addEventListener('click', enterBaseMode);
+
+        var btnAddUnit = el('btnAddUnitModal');
+        if (btnAddUnit) btnAddUnit.addEventListener('click', openAddUnitModal);
 
         // "Quay lại" ở header: đang trong 1 bảng giá / Bảng gốc → về danh sách bảng
         // giá; đang ở danh sách rồi → lùi trong lịch sử tab, KHÔNG nhảy sang trang khác.
@@ -998,7 +1023,12 @@
                 var d = res.data || {};
                 resetUnitForm();
                 loadConfigsForSku(sku);
-                markMappingsStale();
+                // Thêm ĐVT mới ở Bảng gốc → nạp lại lưới để thấy ngay; sửa thì chỉ nhắc.
+                if (state.mode === 'base' && id === 0 && state.mappingLoaded) {
+                    loadAllRows();
+                } else {
+                    markMappingsStale();
+                }
                 // Bảng giá: vừa khai tay 1 giá → hỏi điền các ĐVT còn trống theo tỉ lệ
                 if (state.mode !== 'base'
                     && d.saved_unit_price && parseFloat(d.saved_unit_price) > 0

@@ -125,8 +125,16 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
             </div>
         </div>
 
-        <!-- ── Section: Tìm kiếm & Cấu hình sản phẩm ────────────────── -->
-        <div class="row g-4 mb-4">
+        <!-- ── Modal: Thêm / cấu hình đơn vị (chỉ Bảng gốc) ──────────── -->
+        <div class="modal fade" id="addUnitModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bx bx-plus-circle me-2 text-primary"></i>Thêm / cấu hình đơn vị tính (Bảng gốc)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+        <div class="row g-4">
             <!-- Sidebar: Tìm kiếm sản phẩm -->
             <div class="col-12 col-lg-4 col-xl-3">
                 <div class="tgs-search-panel">
@@ -291,6 +299,10 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 </div>
             </div>
         </div><!-- /.row g-4 -->
+              </div>
+            </div>
+          </div>
+        </div><!-- /#addUnitModal -->
 
         <!-- ── Section: Bảng tổng tất cả cấu hình ────────────────────── -->
         <div class="tgs-table-section">
@@ -309,6 +321,9 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <i class="bx bx-refresh"></i>
                                 </button>
                             </div>
+                            <button class="btn btn-sm btn-primary js-base-only" type="button" id="btnAddUnitModal">
+                                <i class="bx bx-plus me-1"></i>Thêm đơn vị
+                            </button>
                             <button class="btn btn-sm btn-success js-base-only" type="button" id="btnImportExcel">
                                 <i class="bx bx-import me-1"></i>Import Excel (cấu trúc)
                             </button>
