@@ -321,29 +321,47 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <i class="bx bx-refresh"></i>
                                 </button>
                             </div>
+                            <input type="file" id="excelImportFile" accept=".xlsx,.xls" class="d-none">
+                            <input type="file" id="priceImportFile" accept=".xlsx,.xls" class="d-none">
+
                             <button class="btn btn-sm btn-primary js-base-only" type="button" id="btnAddUnitModal">
                                 <i class="bx bx-plus me-1"></i>Thêm đơn vị
                             </button>
-                            <button class="btn btn-sm btn-success js-base-only" type="button" id="btnImportExcel">
-                                <i class="bx bx-import me-1"></i>Import Excel (cấu trúc)
-                            </button>
-                            <input type="file" id="excelImportFile" accept=".xlsx,.xls" class="d-none">
-                            <button class="btn btn-sm btn-primary" type="button" id="btnExportExcel">
+                            <button class="btn btn-sm btn-outline-primary" type="button" id="btnExportExcel">
                                 <i class="bx bx-export me-1"></i>Xuất Excel
                             </button>
                             <button class="btn btn-sm btn-warning js-pricelist-only" type="button" id="btnImportPriceExcel">
                                 <i class="bx bx-dollar me-1"></i>Import Giá
                             </button>
-                            <input type="file" id="priceImportFile" accept=".xlsx,.xls" class="d-none">
-                            <button class="btn btn-sm btn-dark js-base-only" type="button" id="btnUnifyDefaultUnit">
-                                <i class="bx bx-check-double me-1"></i>Thống nhất ĐVT bán chính
-                            </button>
                             <button class="btn btn-sm btn-outline-dark js-pricelist-only" type="button" id="btnResetDefaultToBase">
                                 <i class="bx bx-revision me-1"></i>ĐVT chính theo Bảng gốc
                             </button>
-                            <button class="btn btn-sm btn-primary js-base-only" type="button" id="btnBaseSyncAll">
-                                <i class="bx bx-sync me-1"></i>Đồng bộ Bảng gốc → tất cả bảng giá
-                            </button>
+
+                            <!-- Base: gộp 3 hành động hàng loạt vào 1 dropdown -->
+                            <div class="dropdown js-base-only">
+                                <button class="btn btn-sm btn-dark dropdown-toggle" type="button"
+                                        data-bs-toggle="dropdown" aria-expanded="false">
+                                    <i class="bx bx-list-plus me-1"></i>Nạp &amp; đồng bộ hàng loạt
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                                    <li>
+                                        <button class="dropdown-item" type="button" id="btnImportExcel">
+                                            <i class="bx bx-import me-2 text-success"></i>Import Excel (cấu trúc)
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button class="dropdown-item" type="button" id="btnUnifyDefaultUnit">
+                                            <i class="bx bx-check-double me-2"></i>Thống nhất ĐVT bán chính
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <button class="dropdown-item" type="button" id="btnBaseSyncAll">
+                                            <i class="bx bx-sync me-2 text-primary"></i>Đồng bộ Bảng gốc → tất cả bảng giá
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                 </div>
