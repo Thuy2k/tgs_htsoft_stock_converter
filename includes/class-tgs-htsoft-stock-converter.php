@@ -70,6 +70,25 @@ class TGS_HTSoft_Stock_Converter
         // ── JSON import / export (backward compat) ─────────────────────
         add_action('wp_ajax_tgs_htsoft_converter_export_mappings_json', [$this, 'ajax_export_mappings_json']);
         add_action('wp_ajax_tgs_htsoft_converter_import_mappings_json', [$this, 'ajax_import_mappings_json']);
+
+        // ── BASE: khai báo tỉ lệ quy đổi (nguồn cấu trúc duy nhất) ──────
+        add_action('wp_ajax_tgs_htsoft_base_search_products',      [$this, 'ajax_base_search_products']);
+        add_action('wp_ajax_tgs_htsoft_base_list_configs_by_sku',  [$this, 'ajax_base_list_configs_by_sku']);
+        add_action('wp_ajax_tgs_htsoft_base_save_mapping',         [$this, 'ajax_base_save_mapping']);
+        add_action('wp_ajax_tgs_htsoft_base_delete_mapping',       [$this, 'ajax_base_delete_mapping']);
+        add_action('wp_ajax_tgs_htsoft_base_set_default_unit',     [$this, 'ajax_base_set_default_unit']);
+        add_action('wp_ajax_tgs_htsoft_base_list_mappings',        [$this, 'ajax_base_list_mappings']);
+        add_action('wp_ajax_tgs_htsoft_base_get_mapping',          [$this, 'ajax_base_get_mapping']);
+        add_action('wp_ajax_tgs_htsoft_base_export_excel_rows',    [$this, 'ajax_base_export_excel_rows']);
+        add_action('wp_ajax_tgs_htsoft_base_import_excel_rows',    [$this, 'ajax_base_import_excel_rows']);
+        add_action('wp_ajax_tgs_htsoft_base_default_scan_prepare', [$this, 'ajax_base_default_scan_prepare']);
+        add_action('wp_ajax_tgs_htsoft_base_default_scan_batch',   [$this, 'ajax_base_default_scan_batch']);
+        add_action('wp_ajax_tgs_htsoft_base_sync_prepare',         [$this, 'ajax_base_sync_prepare']);
+        add_action('wp_ajax_tgs_htsoft_base_sync_batch',           [$this, 'ajax_base_sync_batch']);
+
+        // ── Bảng giá: bổ trợ giá theo tỉ lệ + ĐVT chính theo base ──────
+        add_action('wp_ajax_tgs_htsoft_converter_fill_missing_prices',  [$this, 'ajax_fill_missing_prices']);
+        add_action('wp_ajax_tgs_htsoft_converter_reset_default_to_base', [$this, 'ajax_reset_default_to_base']);
     }
 
     // =========================================================================
@@ -192,6 +211,13 @@ class TGS_HTSoft_Stock_Converter
     {
         global $wpdb;
         return $wpdb->base_prefix . 'global_htsoft_price_list_blog';
+    }
+
+    /** Bảng GỐC khai báo tỉ lệ quy đổi (không có giá, không sync xuống shop) */
+    private static function table_unit_base()
+    {
+        global $wpdb;
+        return $wpdb->base_prefix . 'global_htsoft_unit_base';
     }
 
     // =========================================================================
@@ -744,9 +770,19 @@ class TGS_HTSoft_Stock_Converter
         $rows = $wpdb->get_results($sql, ARRAY_A) ?: [];
 
         // ── B2: Đếm số cấu hình DVT cho đúng các SKU vừa tìm được ──────────
-        $rows = self::attach_config_count($rows, self::posted_price_list_id());
+        $scope = (isset($_POST['scope']) && $_POST['scope'] === 'base') ? 'base' : 'pricelist';
+        $rows  = ($scope === 'base')
+            ? self::attach_base_config_count($rows)
+            : self::attach_config_count($rows, self::posted_price_list_id());
 
         self::success(['products' => $rows]);
+    }
+
+    /** Tìm sản phẩm cho màn BASE (đếm config_count từ wp_global_htsoft_unit_base) */
+    public function ajax_base_search_products()
+    {
+        $_POST['scope'] = 'base';
+        $this->ajax_search_products();
     }
 
     /**
@@ -856,8 +892,15 @@ class TGS_HTSoft_Stock_Converter
     }
 
     // =========================================================================
-    // AJAX: Lưu / cập nhật một cấu hình DVT
-    // POST: id (0 = tạo mới), global_product_sku, convert_unit, convert_to_htsoft, convert_note
+    // AJAX: Lưu cấu hình DVT trong 1 BẢNG GIÁ
+    //
+    // Từ 01/09/2026: cấu trúc (ĐVT / tỉ lệ / khối lượng) do BASE quy định — bảng
+    // giá KHÔNG thêm/xóa ĐVT, KHÔNG sửa tỉ lệ. Ở đây chỉ sửa được:
+    //   - unit_price      (giá theo ĐVT, riêng từng bảng giá)
+    //   - convert_note    (ghi chú — khác base ⇒ note_overridden = 1)
+    //   - is_default_unit (đổi ĐVT bán chính cho riêng bảng giá ⇒ default_unit_overridden = 1)
+    //
+    // POST: id (> 0 bắt buộc), unit_price, convert_note, is_default_unit
     // =========================================================================
 
     public function ajax_save_mapping()
@@ -869,19 +912,39 @@ class TGS_HTSoft_Stock_Converter
 
         $mapping_table = self::table_mapping();
 
-        $id        = isset($_POST['id']) ? (int) $_POST['id'] : 0;
-        $sku       = isset($_POST['global_product_sku'])
-                        ? sanitize_text_field(wp_unslash($_POST['global_product_sku']))
-                        : '';
-        $unit      = isset($_POST['convert_unit'])
-                        ? sanitize_text_field(wp_unslash($_POST['convert_unit']))
-                        : '';
-        $to_htsoft = self::parse_positive_decimal($_POST['convert_to_htsoft'] ?? 1, 1);
-        $note      = isset($_POST['convert_note'])
-                        ? sanitize_text_field(wp_unslash($_POST['convert_note']))
-                        : '';
+        $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        if ($id <= 0) {
+            self::error('Thêm / xóa ĐVT phải làm ở "Khai báo tỉ lệ quy đổi" (Bảng gốc). Bảng giá chỉ khai giá.');
+            return;
+        }
 
-        // Giá bán (tuỳ chọn, NULL nếu để trống)
+        $price_list_id = self::posted_price_list_id();
+        if (!$price_list_id) {
+            self::error('Chưa chọn bảng giá.');
+            return;
+        }
+
+        // Dòng gốc trong bảng giá
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_htsoft_stock_convert_id, price_list_id, global_product_sku,
+                    convert_unit, convert_to_htsoft, unit_price, is_default_unit
+             FROM {$mapping_table}
+             WHERE global_htsoft_stock_convert_id = %d
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+             LIMIT 1",
+            $id
+        ), ARRAY_A);
+
+        if (!$row || (int) $row['price_list_id'] !== (int) $price_list_id) {
+            self::error('Không tìm thấy dòng cấu hình trong bảng giá này.');
+            return;
+        }
+
+        $sku  = (string) $row['global_product_sku'];
+        $unit = (string) $row['convert_unit'];
+        $now  = current_time('mysql');
+
+        // ── Giá bán (NULL nếu để trống) ────────────────────────────────
         $raw_price  = isset($_POST['unit_price']) ? trim(wp_unslash($_POST['unit_price'])) : '';
         $unit_price = null;
         if ($raw_price !== '') {
@@ -891,176 +954,99 @@ class TGS_HTSoft_Stock_Converter
             }
         }
 
-        // Khối lượng kg của 1 DVT (tuỳ chọn, NULL nếu để trống)
-        $unit_weight_kg = self::parse_optional_decimal($_POST['unit_weight_kg'] ?? '');
-
-        // ĐVT bán chính — 1 SKU chỉ có duy nhất 1 dòng = 1
-        $is_default_unit = !empty($_POST['is_default_unit']) ? 1 : 0;
-
-        if ($sku === '') {
-            self::error('Thiếu SKU sản phẩm.');
-            return;
-        }
-        if ($unit === '' && $id === 0) {
-            self::error('Thiếu tên Đơn Vị Tính (DVT).');
-            return;
-        }
-
-        if ($note === '') {
-            $note = self::build_default_note($unit, $to_htsoft);
-        }
-
-        $now           = current_time('mysql');
-        $user_id       = get_current_user_id();
-        $price_list_id = self::posted_price_list_id();
-
-        if (!$price_list_id) {
-            self::error('Chưa có bảng giá nào. Hãy tạo bảng giá trước khi cấu hình ĐVT.');
-            return;
-        }
-
-        $data = [
-            'price_list_id'      => $price_list_id,
-            'global_product_sku' => $sku,
-            'convert_unit'       => $unit,
-            'convert_from_tgs'   => 1,
-            'convert_to_htsoft'  => $to_htsoft,
-            'convert_note'       => $note,
-            'unit_price'         => $unit_price,
-            'unit_weight_kg'     => $unit_weight_kg,
-            'is_default_unit'    => $is_default_unit,
-            'user_id'            => $user_id,
-            'is_deleted'         => 0,
-            'deleted_at'         => null,
-            'updated_at'         => $now,
-        ];
-        $formats = [
-            '%d',
-            '%s',
-            '%s',
-            '%f',
-            '%f',
-            '%s',
-            $unit_price !== null ? '%f' : '%s',
-            $unit_weight_kg !== null ? '%f' : '%s',
-            '%d',
-            '%d',
-            '%d',
-            '%s',
-            '%s',
-        ];
-
-        // ── CẬP NHẬT theo ID ────────────────────────────────────────────
-        if ($id > 0) {
-            // Kiểm tra trùng unit với row khác trong CÙNG bảng giá (case-insensitive)
-            $conflict = $wpdb->get_var($wpdb->prepare(
-                "SELECT global_htsoft_stock_convert_id
-                 FROM {$mapping_table}
-                 WHERE price_list_id = %d
-                   AND BINARY global_product_sku = %s
-                   AND convert_unit = %s
-                   AND global_htsoft_stock_convert_id <> %d
-                   AND (is_deleted = 0 OR is_deleted IS NULL)
-                 LIMIT 1",
-                $price_list_id,
-                $sku,
-                $unit,
-                $id
-            ));
-            if ($conflict) {
-                self::error('DVT "' . $unit . '" đã tồn tại cho SKU này. Vui lòng dùng tên DVT khác.');
-                return;
-            }
-
-            $updated = $wpdb->update(
-                $mapping_table,
-                $data,
-                ['global_htsoft_stock_convert_id' => $id],
-                $formats,
-                ['%d']
-            );
-
-            if ($updated === false) {
-                self::error('Không thể cập nhật cấu hình.');
-                return;
-            }
-
-            // Chọn làm ĐVT bán chính → hạ cờ mọi DVT khác của SKU trong bảng giá này
-            if ($is_default_unit === 1) {
-                self::apply_default_for_sku($sku, $id, $price_list_id);
-            }
-
-            self::success(['id' => $id], 'Đã cập nhật cấu hình DVT "' . $unit . '".');
-            return;
-        }
-
-        // ── TẠO MỚI hoặc UPDATE nếu (bảng giá, sku, unit) đã tồn tại ────────────
-        // Dùng convert_unit collation unicode_ci → MySQL tự so sánh case-insensitive
-        $existing_id = $wpdb->get_var($wpdb->prepare(
-            "SELECT global_htsoft_stock_convert_id
-             FROM {$mapping_table}
-             WHERE price_list_id = %d
-               AND BINARY global_product_sku = %s
-               AND convert_unit = %s
-             LIMIT 1",
-            $price_list_id,
+        // ── Ghi chú: so với ghi chú GỐC ở base để đặt cờ override ──────
+        $note      = isset($_POST['convert_note']) ? sanitize_text_field(wp_unslash($_POST['convert_note'])) : '';
+        $base_note = (string) $wpdb->get_var($wpdb->prepare(
+            "SELECT convert_note FROM " . self::table_unit_base() . "
+             WHERE BINARY global_product_sku = %s AND convert_unit = %s LIMIT 1",
             $sku,
             $unit
         ));
-
-        if ($existing_id) {
-            // Kiểm tra xem đang active hay soft-deleted
-            $is_deleted = $wpdb->get_var($wpdb->prepare(
-                "SELECT is_deleted FROM {$mapping_table}
-                 WHERE global_htsoft_stock_convert_id = %d",
-                (int) $existing_id
-            ));
-
-            if ((int) $is_deleted === 0) {
-                self::error('DVT "' . $unit . '" đã tồn tại cho SKU này. Hãy chọn trong danh sách để chỉnh sửa.');
-                return;
-            }
-
-            // Khôi phục bản ghi đã bị xóa mềm
-            $wpdb->update(
-                $mapping_table,
-                $data,
-                ['global_htsoft_stock_convert_id' => (int) $existing_id],
-                $formats,
-                ['%d']
-            );
-            if ($is_default_unit === 1) {
-                self::apply_default_for_sku($sku, (int) $existing_id, $price_list_id);
-            }
-            self::success(['id' => (int) $existing_id], 'Đã khôi phục và cập nhật cấu hình DVT "' . $unit . '".');
-            return;
+        if ($note === '') {
+            $note = ($base_note !== '') ? $base_note : self::build_default_note($unit, (float) $row['convert_to_htsoft']);
         }
+        $note_overridden = ($note !== $base_note && $base_note !== '') ? 1 : 0;
 
-        $data['created_at'] = $now;
-        $inserted = $wpdb->insert(
+        $is_default_unit = !empty($_POST['is_default_unit']) ? 1 : 0;
+
+        $data = [
+            'unit_price'      => $unit_price,
+            'convert_note'    => $note,
+            'note_overridden' => $note_overridden,
+            'updated_at'      => $now,
+        ];
+        $formats = [$unit_price !== null ? '%f' : '%s', '%s', '%d', '%s'];
+
+        $updated = $wpdb->update(
             $mapping_table,
             $data,
-            array_merge($formats, ['%s'])
+            ['global_htsoft_stock_convert_id' => $id],
+            $formats,
+            ['%d']
         );
-
-        if (!$inserted) {
-            self::error('Không thể tạo cấu hình quy đổi.');
+        if ($updated === false) {
+            self::error('Không thể cập nhật cấu hình.');
             return;
         }
 
-        $new_id = (int) $wpdb->insert_id;
-        if ($is_default_unit === 1) {
-            self::apply_default_for_sku($sku, $new_id, $price_list_id);
+        // ── Đổi ĐVT bán chính cho RIÊNG bảng giá này ───────────────────
+        if ($is_default_unit === 1 && (int) $row['is_default_unit'] !== 1) {
+            self::apply_default_for_sku($sku, $id, $price_list_id);
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$mapping_table} SET default_unit_overridden = 1, updated_at = %s
+                 WHERE price_list_id = %d AND BINARY global_product_sku = %s",
+                $now,
+                $price_list_id,
+                $sku
+            ));
         }
 
-        self::success(['id' => $new_id], 'Đã tạo cấu hình DVT "' . $unit . '".');
+        // ── ĐVT cùng SKU trong bảng giá này còn thiếu giá → cho JS hỏi ──
+        $missing = $wpdb->get_results($wpdb->prepare(
+            "SELECT convert_unit, convert_to_htsoft
+             FROM {$mapping_table}
+             WHERE price_list_id = %d
+               AND BINARY global_product_sku = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+               AND (unit_price IS NULL OR unit_price = '')
+             ORDER BY convert_to_htsoft ASC",
+            $price_list_id,
+            $sku
+        ), ARRAY_A) ?: [];
+
+        self::success([
+            'id'                 => $id,
+            'global_product_sku' => $sku,
+            'saved_unit'         => $unit,
+            'saved_unit_price'   => $unit_price,
+            'saved_unit_ratio'   => (float) $row['convert_to_htsoft'],
+            'missing_price_units' => array_map(function ($m) {
+                return [
+                    'unit'  => (string) $m['convert_unit'],
+                    'ratio' => (float) $m['convert_to_htsoft'],
+                ];
+            }, $missing),
+        ], 'Đã lưu giá cho ĐVT "' . $unit . '".');
     }
 
     // =========================================================================
-    // AJAX: Xóa vĩnh viễn một cấu hình
+    // AJAX: Xóa 1 cấu hình DVT trong bảng giá
+    //
+    // Từ 01/09/2026: xóa ĐVT là thay đổi CẤU TRÚC ⇒ phải làm ở Bảng gốc
+    // (ajax_base_delete_mapping). Ở bảng giá chỉ chặn.
     // =========================================================================
 
     public function ajax_delete_mapping()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        self::error('ĐVT do "Khai báo tỉ lệ quy đổi" (Bảng gốc) quản lý. '
+            . 'Muốn xóa ĐVT hãy xóa ở Bảng gốc — mọi bảng giá sẽ tự cập nhật theo.');
+    }
+
+    /** @deprecated Xóa cứng theo ID — chỉ dùng nội bộ / lịch sử */
+    public function ajax_delete_mapping_legacy()
     {
         self::check_permission();
         self::check_nonce();
@@ -1140,16 +1126,26 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
-        self::apply_default_for_sku(
-            (string) $row['global_product_sku'],
-            $id,
-            (int) $row['price_list_id']
-        );
+        $sku     = (string) $row['global_product_sku'];
+        $list_id = (int) $row['price_list_id'];
+
+        self::apply_default_for_sku($sku, $id, $list_id);
+
+        // Bảng giá tự chọn ĐVT bán chính ⇒ đánh dấu override để propagation từ
+        // Base KHÔNG ghi đè lựa chọn này.
+        $wpdb->query($wpdb->prepare(
+            "UPDATE " . self::table_mapping() . "
+             SET default_unit_overridden = 1, updated_at = %s
+             WHERE price_list_id = %d AND BINARY global_product_sku = %s",
+            current_time('mysql'),
+            $list_id,
+            $sku
+        ));
 
         $label = ($row['convert_unit'] !== '') ? $row['convert_unit'] : 'Mặc định';
         self::success(
-            ['id' => $id, 'global_product_sku' => $row['global_product_sku']],
-            'Đã đặt "' . $label . '" làm ĐVT bán chính.'
+            ['id' => $id, 'global_product_sku' => $sku],
+            'Đã đặt "' . $label . '" làm ĐVT bán chính cho bảng giá này.'
         );
     }
 
@@ -2124,6 +2120,10 @@ class TGS_HTSoft_Stock_Converter
         $mapping_table = self::table_mapping();
         $now           = current_time('mysql');
         $price_list_id = self::posted_price_list_id();
+        // Mặc định KHÔNG tự suy giá cho ĐVT thiếu: giá phải lấy CHUẨN theo ĐVT
+        // trong file Excel (dữ liệu từ phần mềm cũ). Chỉ khi người dùng chủ động
+        // bật checkbox mới suy giá theo tỉ lệ.
+        $derive_missing = !empty($_POST['derive_missing']);
         $updated       = 0;
         $no_change     = 0;
         $skipped       = 0;
@@ -2186,8 +2186,9 @@ class TGS_HTSoft_Stock_Converter
             }
 
             // Tìm base price từ Excel rows có giá để suy cho DVT không có giá
+            // (CHỈ khi bật cờ derive_missing — mặc định tắt)
             $base_price_per_unit = null;
-            foreach ($excel_rows as $er) {
+            foreach (($derive_missing ? $excel_rows : []) as $er) {
                 if ($er['price'] !== null) {
                     $uk = strtolower(trim($er['unit']));
                     if (isset($db_by_unit[$uk])) {
@@ -2222,10 +2223,11 @@ class TGS_HTSoft_Stock_Converter
                 $current_price = ($dr['unit_price'] !== null && $dr['unit_price'] !== '') ? (float) $dr['unit_price'] : null;
                 $ratio         = (float) $dr['convert_to_htsoft'];
 
-                // Xác định giá cuối: ưu tiên Excel, nếu không có thì suy từ base
+                // Xác định giá cuối: LẤY CHUẨN theo giá trong Excel. Chỉ suy theo
+                // tỉ lệ khi người dùng bật cờ derive_missing.
                 if ($er['price'] !== null) {
                     $final_price = (float) $er['price'];
-                } elseif ($base_price_per_unit !== null && $ratio > 0.0001) {
+                } elseif ($derive_missing && $base_price_per_unit !== null && $ratio > 0.0001) {
                     $final_price = round($base_price_per_unit * $ratio, 2);
                 } else {
                     $skipped++;
@@ -2235,7 +2237,7 @@ class TGS_HTSoft_Stock_Converter
                         'old_price'  => $current_price,
                         'new_price'  => null,
                         'status'     => 'skipped',
-                        'note'       => 'Không có giá trong Excel và không đủ dữ liệu để quy đổi',
+                        'note'       => 'File không có giá cho ĐVT này — giữ nguyên (để trống)',
                     ];
                     continue;
                 }
@@ -2475,18 +2477,21 @@ class TGS_HTSoft_Stock_Converter
         $new_id = (int) $wpdb->insert_id;
         self::sync_default_flag($new_id, $is_def);
 
-        // Nhân bản toàn bộ cấu hình từ bảng giá khác (tuỳ chọn)
-        $copied  = 0;
+        // Bảng giá mới LUÔN lấy cấu trúc (ĐVT + tỉ lệ quy đổi + ĐVT bán chính)
+        // từ Base; giá để trống. Không còn "nhân bản cấu trúc" từ bảng giá khác.
+        $copied  = self::populate_price_list_from_base($new_id);
+
+        // Tuỳ chọn clone: chép thêm GIÁ + ghi chú + ĐVT bán chính từ bảng giá nguồn.
         $copy_id = isset($_POST['copy_from_id']) ? (int) $_POST['copy_from_id'] : 0;
         if ($copy_id > 0 && $copy_id !== $new_id) {
-            $copied = self::copy_configs_between_lists($copy_id, $new_id);
+            self::overlay_price_list_values($copy_id, $new_id);
         }
 
         self::success(
             ['id' => $new_id, 'copied' => $copied],
-            $copied > 0
-                ? 'Đã tạo bảng giá "' . $name . '" và sao chép ' . number_format_i18n($copied) . ' dòng cấu hình.'
-                : 'Đã tạo bảng giá "' . $name . '".'
+            $copy_id > 0
+                ? 'Đã tạo bảng giá "' . $name . '" (cấu trúc từ Bảng gốc, chép giá từ bảng giá nguồn).'
+                : 'Đã tạo bảng giá "' . $name . '" theo cấu trúc Bảng gốc.'
         );
     }
 
@@ -2767,5 +2772,1096 @@ class TGS_HTSoft_Stock_Converter
             'Đã áp dụng cho ' . $assigned . ' website'
                 . ($removed > 0 ? ', gỡ khỏi ' . $removed . ' website.' : '.')
         );
+    }
+
+    // #########################################################################
+    // #  BASE — KHAI BÁO TỈ LỆ QUY ĐỔI  (wp_global_htsoft_unit_base)
+    // #
+    // #  Nguồn CẤU TRÚC duy nhất: mã hàng ↔ ĐVT ↔ tỉ lệ quy đổi ↔ ĐVT bán chính.
+    // #  Mọi thay đổi ở đây được "propagate" (chiếu) xuống MỌI bảng giá trong
+    // #  wp_global_htsoft_stock_convert — bảng giá chỉ khai thêm GIÁ.
+    // #########################################################################
+
+    /** Danh sách price_list_id đang hoạt động (không xóa mềm) */
+    private static function active_price_list_ids()
+    {
+        global $wpdb;
+        $t = self::table_price_list();
+        return array_values(array_map('intval', (array) $wpdb->get_col(
+            "SELECT global_htsoft_price_list_id FROM {$t}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        )));
+    }
+
+    /**
+     * Chiếu cấu trúc Base → các bảng giá.
+     *   - Chèn mọi dòng (SKU, ĐVT) của base còn thiếu (giá = NULL).
+     *   - Đồng bộ tỉ lệ / khối lượng cho dòng đã có.
+     *   - Ghi chú & ĐVT bán chính: chỉ ghi đè khi bảng giá CHƯA override.
+     *   - unit_price KHÔNG bao giờ bị đụng.
+     *
+     * @param string[]|null $skus         Lọc theo SKU (null = toàn bộ base)
+     * @param int           $only_list_id Chỉ chiếu vào 1 bảng giá (0 = tất cả)
+     * @return int Số dòng bị ảnh hưởng
+     */
+    public static function propagate_base_to_price_lists($skus = null, $only_list_id = 0)
+    {
+        global $wpdb;
+
+        $base = self::table_unit_base();
+        $conv = self::table_mapping();
+        $now  = current_time('mysql');
+        $uid  = (int) get_current_user_id();
+
+        $list_ids = ($only_list_id > 0) ? [(int) $only_list_id] : self::active_price_list_ids();
+        if (empty($list_ids)) {
+            return 0;
+        }
+
+        $sku_where = '';
+        $sku_args  = [];
+        if (is_array($skus)) {
+            $skus = array_values(array_unique(array_filter(array_map('strval', $skus), function ($s) {
+                return $s !== '';
+            })));
+            if (empty($skus)) {
+                return 0;
+            }
+            $ph        = implode(',', array_fill(0, count($skus), '%s'));
+            $sku_where = " AND b.global_product_sku IN ({$ph}) ";
+            $sku_args  = $skus;
+        }
+
+        $touched = 0;
+        foreach ($list_ids as $lid) {
+            $sql = "INSERT INTO {$conv}
+                        (price_list_id, global_product_sku, convert_unit, convert_from_tgs, convert_to_htsoft,
+                         convert_note, unit_price, unit_weight_kg, is_default_unit,
+                         note_overridden, default_unit_overridden,
+                         user_id, is_deleted, created_at, updated_at)
+                    SELECT %d, b.global_product_sku, b.convert_unit, b.convert_from_tgs, b.convert_to_htsoft,
+                           b.convert_note, NULL, b.unit_weight_kg, b.is_default_unit,
+                           0, 0,
+                           %d, 0, %s, %s
+                    FROM {$base} b
+                    WHERE (b.is_deleted = 0 OR b.is_deleted IS NULL) {$sku_where}
+                    ON DUPLICATE KEY UPDATE
+                        convert_from_tgs = VALUES(convert_from_tgs),
+                        convert_to_htsoft = VALUES(convert_to_htsoft),
+                        unit_weight_kg = VALUES(unit_weight_kg),
+                        convert_note = IF({$conv}.note_overridden = 1,
+                                          {$conv}.convert_note, VALUES(convert_note)),
+                        is_default_unit = IF({$conv}.default_unit_overridden = 1,
+                                             {$conv}.is_default_unit, VALUES(is_default_unit)),
+                        is_deleted = 0, deleted_at = NULL,
+                        updated_at = VALUES(updated_at)";
+
+            $args = array_merge([$lid, $uid, $now, $now], $sku_args);
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $touched += (int) $wpdb->query($wpdb->prepare($sql, ...$args));
+
+            self::reassert_overridden_defaults($lid, is_array($skus) ? $skus : null);
+        }
+
+        return $touched;
+    }
+
+    /**
+     * Bảng giá đang OVERRIDE ĐVT bán chính của 1 SKU mà lại có > 1 dòng
+     * is_default_unit = 1 (do propagation vừa chèn thêm 1 ĐVT base mang cờ 1) →
+     * giữ đúng 1 dòng: ưu tiên dòng override đang = 1, không có thì dòng id nhỏ
+     * nhất; hạ cờ các dòng còn lại.
+     */
+    private static function reassert_overridden_defaults($list_id, $skus = null)
+    {
+        global $wpdb;
+
+        $conv = self::table_mapping();
+        $now  = current_time('mysql');
+
+        $sku_where = '';
+        $args      = [(int) $list_id];
+        if (is_array($skus) && !empty($skus)) {
+            $ph        = implode(',', array_fill(0, count($skus), '%s'));
+            $sku_where = " AND g.global_product_sku IN ({$ph}) ";
+            $args      = array_merge($args, $skus);
+        }
+
+        $sql = "UPDATE {$conv} c
+                JOIN (
+                    SELECT g.price_list_id, g.global_product_sku,
+                           MIN(CASE WHEN g.default_unit_overridden = 1 AND g.is_default_unit = 1
+                                    THEN g.global_htsoft_stock_convert_id END) AS ov_default_id,
+                           MIN(CASE WHEN g.is_default_unit = 1
+                                    THEN g.global_htsoft_stock_convert_id END) AS any_default_id
+                    FROM {$conv} g
+                    WHERE g.price_list_id = %d
+                      AND (g.is_deleted = 0 OR g.is_deleted IS NULL)
+                      {$sku_where}
+                    GROUP BY g.price_list_id, g.global_product_sku
+                    HAVING MAX(g.default_unit_overridden = 1) = 1
+                       AND SUM(g.is_default_unit = 1) > 1
+                ) k ON k.price_list_id = c.price_list_id
+                   AND k.global_product_sku = c.global_product_sku
+                SET c.is_default_unit = 0, c.updated_at = %s
+                WHERE c.price_list_id = %d
+                  AND c.is_default_unit = 1
+                  AND c.global_htsoft_stock_convert_id <> COALESCE(k.ov_default_id, k.any_default_id)";
+
+        $args[] = $now;
+        $args[] = (int) $list_id;
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $wpdb->query($wpdb->prepare($sql, ...$args));
+    }
+
+    /**
+     * Base xóa 1 (SKU, ĐVT) → xóa mềm dòng tương ứng ở MỌI bảng giá.
+     * Bảng giá nào vừa mất ĐVT bán chính của SKU → chọn lại.
+     */
+    public static function propagate_base_delete($sku, $unit)
+    {
+        global $wpdb;
+
+        $conv = self::table_mapping();
+        $now  = current_time('mysql');
+
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$conv} SET is_deleted = 1, deleted_at = %s, updated_at = %s
+             WHERE BINARY global_product_sku = %s AND convert_unit = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)",
+            $now,
+            $now,
+            (string) $sku,
+            (string) $unit
+        ));
+
+        $lists = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT price_list_id FROM {$conv} WHERE BINARY global_product_sku = %s",
+            (string) $sku
+        ));
+
+        foreach ((array) $lists as $lid) {
+            $lid = (int) $lid;
+            $has = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$conv}
+                 WHERE price_list_id = %d AND BINARY global_product_sku = %s
+                   AND is_default_unit = 1 AND (is_deleted = 0 OR is_deleted IS NULL)",
+                $lid,
+                (string) $sku
+            ));
+            if ($has === 0) {
+                $winner = self::pick_default_config(self::fetch_active_configs((string) $sku, $lid));
+                if ($winner) {
+                    self::apply_default_for_sku((string) $sku, (int) $winner['global_htsoft_stock_convert_id'], $lid);
+                }
+            }
+        }
+    }
+
+    /** Bảng giá mới: đổ toàn bộ cấu trúc từ Base (giá NULL) */
+    public static function populate_price_list_from_base($new_list_id)
+    {
+        return self::propagate_base_to_price_lists(null, (int) $new_list_id);
+    }
+
+    /** Clone: chép GIÁ + ghi chú + ĐVT bán chính từ bảng giá nguồn đè lên đích */
+    private static function overlay_price_list_values($from_id, $to_id)
+    {
+        global $wpdb;
+
+        $conv = self::table_mapping();
+        $now  = current_time('mysql');
+
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$conv} d
+             JOIN {$conv} s
+               ON s.price_list_id = %d
+              AND s.convert_unit = d.convert_unit
+              AND BINARY s.global_product_sku = d.global_product_sku
+             SET d.unit_price              = s.unit_price,
+                 d.convert_note            = s.convert_note,
+                 d.note_overridden         = s.note_overridden,
+                 d.is_default_unit         = s.is_default_unit,
+                 d.default_unit_overridden = s.default_unit_overridden,
+                 d.updated_at              = %s
+             WHERE d.price_list_id = %d
+               AND (d.is_deleted = 0 OR d.is_deleted IS NULL)
+               AND (s.is_deleted = 0 OR s.is_deleted IS NULL)",
+            (int) $from_id,
+            $now,
+            (int) $to_id
+        ));
+    }
+
+    // ── Base: helpers ──────────────────────────────────────────────────────
+
+    /** Đếm số ĐVT khai trong BASE cho danh sách sản phẩm (giống attach_config_count) */
+    private static function attach_base_config_count($rows)
+    {
+        if (empty($rows)) {
+            return [];
+        }
+
+        global $wpdb;
+
+        $skus = [];
+        foreach ($rows as $row) {
+            $sku = (string) ($row['local_product_sku'] ?? '');
+            if ($sku !== '') {
+                $skus[$sku] = true;
+            }
+        }
+        $skus = array_keys($skus);
+
+        $counts = [];
+        if (!empty($skus)) {
+            $base         = self::table_unit_base();
+            $placeholders = implode(',', array_fill(0, count($skus), '%s'));
+            $sql = "SELECT global_product_sku, COUNT(*) AS config_count
+                    FROM {$base}
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                      AND global_product_sku IN ({$placeholders})
+                    GROUP BY global_product_sku";
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $found = $wpdb->get_results($wpdb->prepare($sql, ...$skus), ARRAY_A) ?: [];
+            foreach ($found as $f) {
+                $counts[(string) $f['global_product_sku']] = (int) $f['config_count'];
+            }
+        }
+
+        foreach ($rows as &$row) {
+            $sku = (string) ($row['local_product_sku'] ?? '');
+            $row['config_count'] = $counts[$sku] ?? 0;
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /** Toàn bộ dòng base đang hoạt động của 1 SKU */
+    private static function fetch_base_active_configs($sku)
+    {
+        global $wpdb;
+        $base = self::table_unit_base();
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT global_htsoft_unit_base_id, convert_unit, convert_to_htsoft, is_default_unit
+             FROM {$base}
+             WHERE BINARY global_product_sku = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_htsoft_unit_base_id ASC",
+            (string) $sku
+        ), ARRAY_A) ?: [];
+    }
+
+    /**
+     * Chọn ĐVT bán chính cho BASE (không xét giá — base không có giá).
+     * Quy tắc: bỏ ĐVT Thùng/kg → tỉ lệ > 1 nhỏ nhất → nếu không có thì tỉ lệ = 1.
+     *
+     * @return array|null Dòng base được chọn
+     */
+    private static function pick_base_default_config($rows)
+    {
+        $bigger = [];
+        $ones   = [];
+        foreach ($rows as $r) {
+            if (self::is_excluded_unit($r['convert_unit'] ?? '')) {
+                continue;
+            }
+            $ratio = (float) ($r['convert_to_htsoft'] ?? 1);
+            if ($ratio <= 0) {
+                continue;
+            }
+            if ($ratio > 1 + self::RATIO_EPS) {
+                $bigger[] = $r;
+            } else {
+                $ones[] = $r;
+            }
+        }
+
+        usort($bigger, function ($a, $b) {
+            $ra = (float) $a['convert_to_htsoft'];
+            $rb = (float) $b['convert_to_htsoft'];
+            if (abs($ra - $rb) > self::RATIO_EPS) {
+                return ($ra < $rb) ? -1 : 1;
+            }
+            return ((int) $a['global_htsoft_unit_base_id']) <=> ((int) $b['global_htsoft_unit_base_id']);
+        });
+        usort($ones, function ($a, $b) {
+            return ((int) $a['global_htsoft_unit_base_id']) <=> ((int) $b['global_htsoft_unit_base_id']);
+        });
+
+        if (!empty($bigger)) { return $bigger[0]; }
+        if (!empty($ones))   { return $ones[0]; }
+        return null;
+    }
+
+    /** Đặt 1 dòng base làm ĐVT bán chính của SKU, các dòng khác về 0 */
+    private static function apply_base_default_for_sku($sku, $winner_id)
+    {
+        global $wpdb;
+        $base = self::table_unit_base();
+        $now  = current_time('mysql');
+
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$base} SET is_default_unit = 0, updated_at = %s
+             WHERE BINARY global_product_sku = %s AND is_default_unit <> 0
+               AND global_htsoft_unit_base_id <> %d",
+            $now,
+            (string) $sku,
+            (int) $winner_id
+        ));
+        if ($winner_id) {
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$base} SET is_default_unit = 1, updated_at = %s
+                 WHERE global_htsoft_unit_base_id = %d AND is_default_unit <> 1",
+                $now,
+                (int) $winner_id
+            ));
+        }
+    }
+
+    // ── Base: AJAX ─────────────────────────────────────────────────────────
+
+    public function ajax_base_list_configs_by_sku()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $sku = isset($_POST['global_product_sku'])
+            ? sanitize_text_field(wp_unslash($_POST['global_product_sku'])) : '';
+        if ($sku === '') {
+            self::error('Thiếu SKU sản phẩm.');
+            return;
+        }
+
+        $base = self::table_unit_base();
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT global_htsoft_unit_base_id,
+                    global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
+                    global_product_sku, convert_unit,
+                    convert_from_tgs, convert_to_htsoft, convert_note,
+                    unit_weight_kg, is_default_unit, updated_at
+             FROM {$base}
+             WHERE BINARY global_product_sku = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY convert_to_htsoft ASC, convert_unit ASC",
+            $sku
+        ), ARRAY_A) ?: [];
+
+        self::success(['configs' => $rows]);
+    }
+
+    /**
+     * Lưu / tạo 1 dòng khai báo trong BASE.
+     * POST: id (0 = tạo mới), global_product_sku, convert_unit, convert_to_htsoft,
+     *       convert_note, unit_weight_kg, is_default_unit
+     */
+    public function ajax_base_save_mapping()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $base = self::table_unit_base();
+
+        $id        = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        $sku       = isset($_POST['global_product_sku'])
+                        ? sanitize_text_field(wp_unslash($_POST['global_product_sku'])) : '';
+        $unit      = isset($_POST['convert_unit'])
+                        ? sanitize_text_field(wp_unslash($_POST['convert_unit'])) : '';
+        $to_htsoft = self::parse_positive_decimal($_POST['convert_to_htsoft'] ?? 1, 1);
+        $note      = isset($_POST['convert_note'])
+                        ? sanitize_text_field(wp_unslash($_POST['convert_note'])) : '';
+        $weight    = self::parse_optional_decimal($_POST['unit_weight_kg'] ?? '');
+        $is_def    = !empty($_POST['is_default_unit']) ? 1 : 0;
+
+        if ($sku === '') {
+            self::error('Thiếu SKU sản phẩm.');
+            return;
+        }
+        if ($unit === '' && $id === 0) {
+            self::error('Thiếu tên Đơn Vị Tính (ĐVT).');
+            return;
+        }
+        if ($note === '') {
+            $note = self::build_default_note($unit, $to_htsoft);
+        }
+
+        $now  = current_time('mysql');
+        $uid  = get_current_user_id();
+
+        $data = [
+            'global_product_sku' => $sku,
+            'convert_unit'       => $unit,
+            'convert_from_tgs'   => 1,
+            'convert_to_htsoft'  => $to_htsoft,
+            'convert_note'       => $note,
+            'unit_weight_kg'     => $weight,
+            'is_default_unit'    => $is_def,
+            'user_id'            => $uid,
+            'is_deleted'         => 0,
+            'deleted_at'         => null,
+            'updated_at'         => $now,
+        ];
+        $formats = ['%s', '%s', '%f', '%f', '%s', $weight !== null ? '%f' : '%s', '%d', '%d', '%d', '%s', '%s'];
+
+        if ($id > 0) {
+            $conflict = $wpdb->get_var($wpdb->prepare(
+                "SELECT global_htsoft_unit_base_id FROM {$base}
+                 WHERE BINARY global_product_sku = %s AND convert_unit = %s
+                   AND global_htsoft_unit_base_id <> %d
+                   AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1",
+                $sku,
+                $unit,
+                $id
+            ));
+            if ($conflict) {
+                self::error('ĐVT "' . $unit . '" đã có trong Bảng gốc cho SKU này.');
+                return;
+            }
+            $wpdb->update($base, $data, ['global_htsoft_unit_base_id' => $id], $formats, ['%d']);
+            $row_id = $id;
+        } else {
+            $existing = $wpdb->get_var($wpdb->prepare(
+                "SELECT global_htsoft_unit_base_id FROM {$base}
+                 WHERE BINARY global_product_sku = %s AND convert_unit = %s LIMIT 1",
+                $sku,
+                $unit
+            ));
+            if ($existing) {
+                $wpdb->update($base, $data, ['global_htsoft_unit_base_id' => (int) $existing], $formats, ['%d']);
+                $row_id = (int) $existing;
+            } else {
+                $data['created_at'] = $now;
+                $wpdb->insert($base, $data, array_merge($formats, ['%s']));
+                $row_id = (int) $wpdb->insert_id;
+            }
+        }
+
+        if ($is_def === 1 && $row_id) {
+            self::apply_base_default_for_sku($sku, $row_id);
+        }
+
+        // Chiếu xuống mọi bảng giá
+        self::propagate_base_to_price_lists([$sku]);
+
+        self::success(['id' => $row_id], 'Đã lưu khai báo ĐVT "' . $unit . '" ở Bảng gốc.');
+    }
+
+    public function ajax_base_delete_mapping()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        if ($id <= 0) {
+            self::error('ID không hợp lệ.');
+            return;
+        }
+
+        $base = self::table_unit_base();
+        $row  = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_product_sku, convert_unit, is_default_unit
+             FROM {$base} WHERE global_htsoft_unit_base_id = %d",
+            $id
+        ), ARRAY_A);
+        if (!$row) {
+            self::error('Không tìm thấy khai báo.');
+            return;
+        }
+
+        $sku  = (string) $row['global_product_sku'];
+        $unit = (string) $row['convert_unit'];
+
+        $wpdb->delete($base, ['global_htsoft_unit_base_id' => $id], ['%d']);
+
+        // Chọn lại ĐVT bán chính ở base nếu vừa xóa đúng dòng đó
+        if ((int) $row['is_default_unit'] === 1) {
+            $winner = self::pick_base_default_config(self::fetch_base_active_configs($sku));
+            if ($winner) {
+                self::apply_base_default_for_sku($sku, (int) $winner['global_htsoft_unit_base_id']);
+            }
+        }
+
+        // Xóa mềm ở mọi bảng giá + chọn lại ĐVT chính chỗ nào mất
+        self::propagate_base_delete($sku, $unit);
+        // Đồng bộ lại phần còn lại (tỉ lệ / ĐVT chính mới)
+        self::propagate_base_to_price_lists([$sku]);
+
+        self::success(['id' => $id], 'Đã xóa ĐVT "' . $unit . '" ở Bảng gốc. Mọi bảng giá đã cập nhật theo.');
+    }
+
+    public function ajax_base_set_default_unit()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        if ($id <= 0) {
+            self::error('ID không hợp lệ.');
+            return;
+        }
+
+        $base = self::table_unit_base();
+        $row  = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_product_sku, convert_unit FROM {$base}
+             WHERE global_htsoft_unit_base_id = %d
+               AND (is_deleted = 0 OR is_deleted IS NULL)",
+            $id
+        ), ARRAY_A);
+        if (!$row) {
+            self::error('Không tìm thấy khai báo.');
+            return;
+        }
+
+        $sku = (string) $row['global_product_sku'];
+        self::apply_base_default_for_sku($sku, $id);
+        self::propagate_base_to_price_lists([$sku]);
+
+        self::success(
+            ['id' => $id, 'global_product_sku' => $sku],
+            'Đã đặt "' . $row['convert_unit'] . '" làm ĐVT bán chính (Bảng gốc). '
+                . 'Bảng giá nào chưa tự chọn riêng sẽ cập nhật theo.'
+        );
+    }
+
+    public function ajax_base_get_mapping()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
+        if ($id <= 0) {
+            self::error('ID không hợp lệ.');
+            return;
+        }
+
+        $base = self::table_unit_base();
+        $row  = $wpdb->get_row($wpdb->prepare(
+            "SELECT global_htsoft_unit_base_id,
+                    global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
+                    global_product_sku, convert_unit,
+                    convert_from_tgs, convert_to_htsoft, convert_note,
+                    unit_weight_kg, is_default_unit
+             FROM {$base} WHERE global_htsoft_unit_base_id = %d
+               AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1",
+            $id
+        ), ARRAY_A);
+        if (!$row) {
+            self::error('Không tìm thấy khai báo.');
+            return;
+        }
+
+        $hydrated = self::attach_product_info([$row]);
+        self::success(['mapping' => $hydrated[0]]);
+    }
+
+    /**
+     * Bảng tổng BASE — phân trang phía server (không có cột giá).
+     * POST: keyword, page, per_page
+     */
+    public function ajax_base_list_mappings()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $base    = self::table_unit_base();
+        $keyword = isset($_POST['keyword']) ? sanitize_text_field(wp_unslash($_POST['keyword'])) : '';
+
+        $page = isset($_POST['page']) ? max(1, (int) $_POST['page']) : 1;
+        $per_page = isset($_POST['per_page']) ? (int) $_POST['per_page'] : self::LIST_PER_PAGE_DEFAULT;
+        $per_page = max(10, min(self::LIST_PER_PAGE_MAX, $per_page));
+
+        $where  = '(b.is_deleted = 0 OR b.is_deleted IS NULL)';
+        $params = [];
+
+        if ($keyword !== '') {
+            $like         = '%' . $wpdb->esc_like($keyword) . '%';
+            $matched_skus = self::find_skus_by_product_keyword($like);
+
+            $parts    = ['b.global_product_sku LIKE %s', 'b.convert_unit LIKE %s'];
+            $params[] = $like;
+            $params[] = $like;
+            if (!empty($matched_skus)) {
+                $ph       = implode(',', array_fill(0, count($matched_skus), '%s'));
+                $parts[]  = "b.global_product_sku IN ({$ph})";
+                $params   = array_merge($params, $matched_skus);
+            }
+            $where .= ' AND (' . implode(' OR ', $parts) . ')';
+        }
+
+        $count_sql = "SELECT COUNT(*) FROM {$base} b WHERE {$where}";
+        $total = (int) (empty($params)
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            ? $wpdb->get_var($count_sql)
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            : $wpdb->get_var($wpdb->prepare($count_sql, ...$params)));
+
+        $total_pages = max(1, (int) ceil($total / $per_page));
+        if ($page > $total_pages) {
+            $page = $total_pages;
+        }
+        $offset = ($page - 1) * $per_page;
+
+        $rows_sql = "SELECT b.global_htsoft_unit_base_id,
+                            b.global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
+                            b.global_product_sku, b.convert_unit,
+                            b.convert_from_tgs, b.convert_to_htsoft, b.convert_note,
+                            b.unit_weight_kg, b.is_default_unit, b.updated_at
+                     FROM {$base} b
+                     WHERE {$where}
+                     ORDER BY b.global_product_sku ASC, b.convert_to_htsoft ASC
+                     LIMIT %d OFFSET %d";
+        $row_params = array_merge($params, [$per_page, $offset]);
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $rows = $wpdb->get_results($wpdb->prepare($rows_sql, ...$row_params), ARRAY_A) ?: [];
+        $rows = self::attach_product_info($rows);
+
+        self::success([
+            'mappings'    => $rows,
+            'total'       => $total,
+            'page'        => $page,
+            'per_page'    => $per_page,
+            'total_pages' => $total_pages,
+        ]);
+    }
+
+    public function ajax_base_export_excel_rows()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $base = self::table_unit_base();
+        $rows = $wpdb->get_results(
+            "SELECT global_product_sku, convert_unit, convert_to_htsoft, convert_note,
+                    unit_weight_kg, is_default_unit
+             FROM {$base}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_product_sku ASC, convert_to_htsoft ASC",
+            ARRAY_A
+        ) ?: [];
+
+        $hydrated = [];
+        foreach (array_chunk($rows, 1000) as $chunk) {
+            foreach (self::attach_product_info($chunk) as $r) {
+                $hydrated[] = $r;
+            }
+        }
+
+        $export = [];
+        foreach ($hydrated as $row) {
+            $export[] = [
+                'global_product_sku' => $row['global_product_sku'],
+                'local_product_name' => (string) ($row['local_product_name'] ?? ''),
+                'convert_unit'       => (string) ($row['convert_unit'] ?? ''),
+                'convert_to_htsoft'  => (float) self::parse_positive_decimal($row['convert_to_htsoft'], 1),
+                'unit_weight_kg'     => ($row['unit_weight_kg'] !== null && $row['unit_weight_kg'] !== '')
+                                            ? (float) $row['unit_weight_kg'] : null,
+                'convert_note'       => (string) ($row['convert_note'] ?? ''),
+                'is_default_unit'    => ((int) ($row['is_default_unit'] ?? 0) === 1) ? 1 : 0,
+            ];
+        }
+
+        self::success(['exported_at' => current_time('mysql'), 'count' => count($export), 'rows' => $export]);
+    }
+
+    /**
+     * Import cấu trúc vào BASE (batch). Cột: A Mã · B Tên · C ĐVT · D Tỉ lệ ·
+     * E (bỏ qua — base không có giá) · F Khối lượng · G Ghi chú.
+     * Mỗi lô xong → propagate các SKU trong lô.
+     */
+    public function ajax_base_import_excel_rows()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        $rows_json = isset($_POST['rows_json']) ? wp_unslash($_POST['rows_json']) : '[]';
+        $items     = json_decode($rows_json, true);
+        if (!is_array($items) || empty($items)) {
+            self::error('Không có dữ liệu hợp lệ để import.');
+            return;
+        }
+
+        global $wpdb;
+        $base    = self::table_unit_base();
+        $now     = current_time('mysql');
+        $uid     = get_current_user_id();
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $errors  = [];
+        $skus    = [];
+
+        foreach ($items as $idx => $item) {
+            if (!is_array($item)) { $skipped++; continue; }
+
+            $sku  = isset($item['global_product_sku']) ? sanitize_text_field((string) $item['global_product_sku']) : '';
+            $unit = isset($item['convert_unit']) ? sanitize_text_field((string) $item['convert_unit']) : '';
+            if ($sku === '') { $skipped++; continue; }
+
+            $to_htsoft = self::parse_positive_decimal($item['convert_to_htsoft'] ?? 1, 1);
+            $note      = isset($item['convert_note']) ? sanitize_text_field((string) $item['convert_note']) : '';
+            $weight    = self::parse_optional_decimal($item['unit_weight_kg'] ?? '');
+            if ($note === '') {
+                $note = self::build_default_note($unit, $to_htsoft);
+            }
+
+            $data = [
+                'global_product_sku' => $sku,
+                'convert_unit'       => $unit,
+                'convert_from_tgs'   => 1,
+                'convert_to_htsoft'  => $to_htsoft,
+                'convert_note'       => $note,
+                'unit_weight_kg'     => $weight,
+                'user_id'            => $uid,
+                'is_deleted'         => 0,
+                'deleted_at'         => null,
+                'updated_at'         => $now,
+            ];
+            $formats = ['%s', '%s', '%f', '%f', '%s', $weight !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
+
+            $existing = $wpdb->get_var($wpdb->prepare(
+                "SELECT global_htsoft_unit_base_id FROM {$base}
+                 WHERE BINARY global_product_sku = %s AND convert_unit = %s LIMIT 1",
+                $sku,
+                $unit
+            ));
+
+            if ($existing) {
+                $ok = $wpdb->update($base, $data, ['global_htsoft_unit_base_id' => (int) $existing], $formats, ['%d']);
+                if ($ok !== false) { $updated++; } else { $skipped++; $errors[] = 'Dòng ' . ($idx + 1) . ": lỗi cập nhật ({$sku}/{$unit})."; }
+            } else {
+                $data['created_at'] = $now;
+                $ok = $wpdb->insert($base, $data, array_merge($formats, ['%s']));
+                if ($ok) { $created++; } else { $skipped++; $errors[] = 'Dòng ' . ($idx + 1) . ": lỗi tạo mới ({$sku}/{$unit})."; }
+            }
+
+            $skus[$sku] = true;
+        }
+
+        if (!empty($skus)) {
+            self::propagate_base_to_price_lists(array_keys($skus));
+        }
+
+        self::success([
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'errors'  => $errors,
+        ], "Import Bảng gốc xong. Tạo mới: {$created}, cập nhật: {$updated}, bỏ qua: {$skipped}.");
+    }
+
+    public function ajax_base_default_scan_prepare()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+        $base = self::table_unit_base();
+        $total = (int) $wpdb->get_var(
+            "SELECT COUNT(DISTINCT global_product_sku) FROM {$base}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        );
+        self::success(['total_skus' => $total, 'batch_size' => self::DEFAULT_SCAN_BATCH_SIZE]);
+    }
+
+    public function ajax_base_default_scan_batch()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $base   = self::table_unit_base();
+        $offset = isset($_POST['offset']) ? max(0, (int) $_POST['offset']) : 0;
+        $limit  = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : self::DEFAULT_SCAN_BATCH_SIZE;
+        if ($limit < 10) { $limit = self::DEFAULT_SCAN_BATCH_SIZE; }
+        if ($limit > self::DEFAULT_SCAN_BATCH_MAX) { $limit = self::DEFAULT_SCAN_BATCH_MAX; }
+        $only_missing = !empty($_POST['only_missing']);
+
+        $skus = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT global_product_sku FROM {$base}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_product_sku ASC
+             LIMIT %d OFFSET %d",
+            $limit,
+            $offset
+        ));
+
+        if (empty($skus)) {
+            self::success([
+                'processed' => 0, 'assigned' => 0, 'unchanged' => 0, 'no_candidate' => 0,
+                'next_offset' => $offset, 'done' => true, 'samples' => [],
+            ]);
+            return;
+        }
+
+        $ph   = implode(',', array_fill(0, count($skus), '%s'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT global_htsoft_unit_base_id, global_product_sku, convert_unit,
+                    convert_to_htsoft, is_default_unit
+             FROM {$base}
+             WHERE global_product_sku IN ({$ph})
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_htsoft_unit_base_id ASC",
+            ...$skus
+        ), ARRAY_A) ?: [];
+
+        $groups = [];
+        foreach ($rows as $r) {
+            $groups[(string) $r['global_product_sku']][] = $r;
+        }
+
+        $assigned = 0; $unchanged = 0; $no_candidate = 0;
+        $set_one = []; $set_zero = []; $samples = [];
+
+        foreach ($skus as $sku) {
+            $sku  = (string) $sku;
+            $grp  = $groups[$sku] ?? [];
+            $cur  = [];
+            foreach ($grp as $r) {
+                if ((int) $r['is_default_unit'] === 1) {
+                    $cur[] = (int) $r['global_htsoft_unit_base_id'];
+                }
+            }
+            if ($only_missing && count($cur) === 1) { $unchanged++; continue; }
+
+            $winner    = self::pick_base_default_config($grp);
+            $winner_id = $winner ? (int) $winner['global_htsoft_unit_base_id'] : 0;
+            if (!$winner_id) { $no_candidate++; }
+
+            foreach ($cur as $cid) {
+                if ($cid !== $winner_id) { $set_zero[] = $cid; }
+            }
+            if ($winner_id) {
+                if (count($cur) === 1 && $cur[0] === $winner_id) {
+                    $unchanged++;
+                } else {
+                    $set_one[] = $winner_id;
+                    $assigned++;
+                    if (count($samples) < 20) {
+                        $samples[] = [
+                            'sku'   => $sku,
+                            'unit'  => (string) $winner['convert_unit'],
+                            'ratio' => (float) $winner['convert_to_htsoft'],
+                            'price' => null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        $now = current_time('mysql');
+        if (!empty($set_zero)) {
+            $in = implode(',', array_map('intval', $set_zero));
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$base} SET is_default_unit = 0, updated_at = %s
+                 WHERE global_htsoft_unit_base_id IN ({$in})",
+                $now
+            ));
+        }
+        if (!empty($set_one)) {
+            $in = implode(',', array_map('intval', $set_one));
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$base} SET is_default_unit = 1, updated_at = %s
+                 WHERE global_htsoft_unit_base_id IN ({$in})",
+                $now
+            ));
+        }
+
+        // Chiếu ĐVT bán chính mới xuống bảng giá (chỗ nào chưa override)
+        self::propagate_base_to_price_lists(array_map('strval', $skus));
+
+        $processed = count($skus);
+        self::success([
+            'processed'    => $processed,
+            'assigned'     => $assigned,
+            'unchanged'    => $unchanged,
+            'no_candidate' => $no_candidate,
+            'next_offset'  => $offset + $processed,
+            'done'         => ($processed < $limit),
+            'samples'      => $samples,
+        ]);
+    }
+
+    /** Đồng bộ Base → tất cả bảng giá (nút bảo trì). Chạy theo lô SKU. */
+    public function ajax_base_sync_prepare()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+        $base = self::table_unit_base();
+        $total = (int) $wpdb->get_var(
+            "SELECT COUNT(DISTINCT global_product_sku) FROM {$base}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        );
+        self::success(['total_skus' => $total, 'batch_size' => self::DEFAULT_SCAN_BATCH_SIZE]);
+    }
+
+    public function ajax_base_sync_batch()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $base   = self::table_unit_base();
+        $offset = isset($_POST['offset']) ? max(0, (int) $_POST['offset']) : 0;
+        $limit  = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : self::DEFAULT_SCAN_BATCH_SIZE;
+        $limit  = max(10, min(self::DEFAULT_SCAN_BATCH_MAX, $limit));
+
+        $skus = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT global_product_sku FROM {$base}
+             WHERE (is_deleted = 0 OR is_deleted IS NULL)
+             ORDER BY global_product_sku ASC
+             LIMIT %d OFFSET %d",
+            $limit,
+            $offset
+        ));
+
+        if (empty($skus)) {
+            self::success(['processed' => 0, 'next_offset' => $offset, 'done' => true]);
+            return;
+        }
+
+        $affected  = self::propagate_base_to_price_lists(array_map('strval', $skus));
+        $processed = count($skus);
+
+        self::success([
+            'processed'   => $processed,
+            'affected'    => $affected,
+            'next_offset' => $offset + $processed,
+            'done'        => ($processed < $limit),
+        ]);
+    }
+
+    // ── Bảng giá: bổ trợ ──────────────────────────────────────────────────
+
+    /**
+     * Điền giá cho các ĐVT cùng SKU đang TRỐNG giá trong bảng giá hiện tại,
+     * suy theo tỉ lệ từ 1 giá mốc. Không đụng ĐVT đã có giá.
+     * POST: global_product_sku, from_unit_price, from_ratio (tuỳ chọn)
+     */
+    public function ajax_fill_missing_prices()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $sku = isset($_POST['global_product_sku'])
+            ? sanitize_text_field(wp_unslash($_POST['global_product_sku'])) : '';
+        if ($sku === '') {
+            self::error('Thiếu SKU sản phẩm.');
+            return;
+        }
+
+        $price_list_id = self::posted_price_list_id();
+        if (!$price_list_id) {
+            self::error('Chưa chọn bảng giá.');
+            return;
+        }
+
+        $conv = self::table_mapping();
+
+        // Giá 1 ĐVT NHỎ NHẤT làm mốc
+        $per_smallest = 0.0;
+        $from_price   = isset($_POST['from_unit_price']) ? (float) str_replace(',', '.', (string) $_POST['from_unit_price']) : 0.0;
+        $from_ratio   = isset($_POST['from_ratio']) ? (float) $_POST['from_ratio'] : 0.0;
+        if ($from_price > 0 && $from_ratio > 0) {
+            $per_smallest = $from_price / $from_ratio;
+        } else {
+            $priced = $wpdb->get_results($wpdb->prepare(
+                "SELECT convert_to_htsoft, unit_price FROM {$conv}
+                 WHERE price_list_id = %d AND BINARY global_product_sku = %s
+                   AND (is_deleted = 0 OR is_deleted IS NULL)
+                   AND unit_price IS NOT NULL AND unit_price > 0
+                 ORDER BY convert_to_htsoft ASC",
+                $price_list_id,
+                $sku
+            ), ARRAY_A) ?: [];
+            foreach ($priced as $p) {
+                $r = (float) $p['convert_to_htsoft'];
+                if ($r > 0) { $per_smallest = (float) $p['unit_price'] / $r; break; }
+            }
+        }
+
+        if ($per_smallest <= 0) {
+            self::error('Chưa có giá mốc nào để suy. Hãy nhập giá cho ít nhất 1 ĐVT.');
+            return;
+        }
+
+        $now     = current_time('mysql');
+        $updated = (int) $wpdb->query($wpdb->prepare(
+            "UPDATE {$conv}
+             SET unit_price = ROUND(%f * convert_to_htsoft, 2), updated_at = %s
+             WHERE price_list_id = %d AND BINARY global_product_sku = %s
+               AND (is_deleted = 0 OR is_deleted IS NULL)
+               AND (unit_price IS NULL OR unit_price = '' OR unit_price = 0)",
+            $per_smallest,
+            $now,
+            $price_list_id,
+            $sku
+        ));
+
+        self::success(['updated' => $updated], 'Đã điền giá theo tỉ lệ cho ' . $updated . ' ĐVT còn trống.');
+    }
+
+    /**
+     * Bỏ override ĐVT bán chính của bảng giá → quay về theo Base.
+     * POST: global_product_sku (rỗng = toàn bộ bảng giá)
+     */
+    public function ajax_reset_default_to_base()
+    {
+        self::check_permission();
+        self::check_nonce();
+
+        global $wpdb;
+
+        $price_list_id = self::posted_price_list_id();
+        if (!$price_list_id) {
+            self::error('Chưa chọn bảng giá.');
+            return;
+        }
+
+        $sku  = isset($_POST['global_product_sku'])
+            ? sanitize_text_field(wp_unslash($_POST['global_product_sku'])) : '';
+        $conv = self::table_mapping();
+        $now  = current_time('mysql');
+
+        if ($sku !== '') {
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$conv} SET default_unit_overridden = 0, updated_at = %s
+                 WHERE price_list_id = %d AND BINARY global_product_sku = %s",
+                $now,
+                $price_list_id,
+                $sku
+            ));
+            self::propagate_base_to_price_lists([$sku], $price_list_id);
+        } else {
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$conv} SET default_unit_overridden = 0, updated_at = %s
+                 WHERE price_list_id = %d",
+                $now,
+                $price_list_id
+            ));
+            self::propagate_base_to_price_lists(null, $price_list_id);
+        }
+
+        self::success([], 'Đã đưa ĐVT bán chính về theo Bảng gốc.');
     }
 }

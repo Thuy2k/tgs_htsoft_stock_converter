@@ -47,13 +47,33 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
          MÀN HÌNH 1: Danh sách bảng giá
          ══════════════════════════════════════════════════════════════════ -->
     <div id="plListSection">
+
+        <!-- Bảng GỐC: khai báo tỉ lệ quy đổi (nguồn cấu trúc duy nhất) -->
+        <div class="tgs-table-panel mb-3" style="border-left:4px solid #6f42c1;">
+            <div class="p-3 d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div>
+                    <h6 class="mb-1 fw-semibold">
+                        <i class="bx bx-git-branch me-1 text-primary"></i>Khai báo tỉ lệ quy đổi (Bảng gốc)
+                    </h6>
+                    <p class="text-muted small mb-0">
+                        Nơi khai chuẩn DUY NHẤT: mã hàng có ĐVT nào, tỉ lệ quy đổi bao nhiêu, ĐVT bán chính nào.
+                        Mọi bảng giá bám theo Bảng gốc — bảng giá chỉ khai <strong>giá</strong>.
+                    </p>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" id="btnOpenBase">
+                    <i class="bx bx-cog me-1"></i>Mở Bảng gốc
+                </button>
+            </div>
+        </div>
+
         <div class="tgs-table-panel">
             <div class="tgs-table-header">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                     <div>
                         <h6 class="mb-1 fw-semibold">Danh sách bảng giá</h6>
                         <p class="text-muted small mb-0">
-                            Mỗi bảng giá có bộ cấu hình ĐVT + giá riêng. Mỗi website chỉ áp dụng 1 bảng giá.
+                            Mỗi bảng giá có bộ <strong>giá theo ĐVT</strong> riêng. Cấu trúc ĐVT + tỉ lệ lấy từ Bảng gốc.
+                            Mỗi website chỉ áp dụng 1 bảng giá.
                         </p>
                     </div>
                     <button type="button" class="btn btn-sm btn-primary" id="btnNewPriceList">
@@ -92,7 +112,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                             </div>
                         </div>
                     </div>
-                    <div class="d-flex align-items-center flex-wrap gap-2">
+                    <div class="d-flex align-items-center flex-wrap gap-2" id="plDetailActions">
                         <span class="badge bg-light text-dark" id="plCurrentBlogs">Chưa áp website nào</span>
                         <button type="button" class="btn btn-sm btn-info" id="btnApplyBlogs">
                             <i class="bx bx-globe me-1"></i>Áp dụng cho website
@@ -226,11 +246,11 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                                min="1" step="1" value="1">
                                         <div class="form-text text-primary fw-semibold" id="cfgRatioPreview">1 DVT = 1 đơn vị</div>
                                     </div>
-                                    <div class="col-12 col-md-3">
+                                    <div class="col-12 col-md-3" id="cfgPriceWrap">
                                         <label class="form-label fw-semibold">Giá bán (VNĐ)</label>
                                         <input type="number" class="form-control" id="cfgUnitPrice"
                                                min="0" step="1000" placeholder="45000">
-                                        <div class="form-text">Tuỳ chọn</div>
+                                        <div class="form-text" id="cfgPriceHint">Tuỳ chọn</div>
                                     </div>
                                     <div class="col-12 col-md-6">
                                         <label class="form-label fw-semibold">Ghi chú hiển thị</label>
@@ -290,7 +310,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                 </button>
                             </div>
                             <button class="btn btn-sm btn-success" type="button" id="btnImportExcel">
-                                <i class="bx bx-import me-1"></i>Import Excel
+                                <i class="bx bx-import me-1"></i>Import Excel (cấu trúc)
                             </button>
                             <input type="file" id="excelImportFile" accept=".xlsx,.xls" class="d-none">
                             <button class="btn btn-sm btn-primary" type="button" id="btnExportExcel">
@@ -303,32 +323,40 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                             <button class="btn btn-sm btn-dark" type="button" id="btnUnifyDefaultUnit">
                                 <i class="bx bx-check-double me-1"></i>Thống nhất ĐVT bán chính
                             </button>
+                            <button class="btn btn-sm btn-outline-dark" type="button" id="btnResetDefaultToBase">
+                                <i class="bx bx-revision me-1"></i>ĐVT chính theo Bảng gốc
+                            </button>
+                            <button class="btn btn-sm btn-primary" type="button" id="btnBaseSyncAll">
+                                <i class="bx bx-sync me-1"></i>Đồng bộ Bảng gốc → tất cả bảng giá
+                            </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Hướng dẫn import -->
                 <div class="tgs-import-guide">
-                    <div class="tgs-guide-item">
+                    <div class="tgs-guide-item" data-mode="base">
                         <i class="bx bx-info-circle text-primary"></i>
                         <div>
-                            <strong>Import Excel (Quy đổi DVT):</strong>
-                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Tỷ lệ · E: Giá · F: Khối lượng · G: Ghi chú</span>
+                            <strong>Import Excel (cấu trúc):</strong>
+                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Tỷ lệ · E: (bỏ qua) · F: Khối lượng · G: Ghi chú
+                                — khai ở Bảng gốc, mọi bảng giá tự cập nhật theo.</span>
                         </div>
                     </div>
-                    <div class="tgs-guide-item">
+                    <div class="tgs-guide-item" data-mode="pricelist">
                         <i class="bx bx-dollar text-warning"></i>
                         <div>
                             <strong>Import Giá:</strong>
-                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Giá bán (tự suy giá cho DVT thiếu)</span>
+                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Giá bán.
+                                Lấy CHUẨN theo giá trong file — ĐVT không có giá để trống (không tự suy).</span>
                         </div>
                     </div>
-                    <div class="tgs-guide-item">
+                    <div class="tgs-guide-item" data-mode="base">
                         <i class="bx bx-check-double text-dark"></i>
                         <div>
                             <strong>Thống nhất ĐVT bán chính:</strong>
-                            <span class="text-muted">Quét toàn bộ, mỗi mã hàng chọn 1 ĐVT ưu tiên cho POS —
-                                tỷ lệ &gt; 1 gần nhất và có giá, bỏ qua Thùng / kg, không có thì quay về tỷ lệ 1</span>
+                            <span class="text-muted">Quét toàn bộ Bảng gốc, mỗi mã hàng chọn 1 ĐVT ưu tiên cho POS —
+                                tỷ lệ &gt; 1 gần nhất, bỏ qua Thùng / kg, không có thì quay về tỷ lệ 1.</span>
                         </div>
                     </div>
                 </div>
@@ -354,7 +382,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <th>Tên sản phẩm</th>
                                     <th>ĐVT bán</th>
                                     <th>Tỷ lệ</th>
-                                    <th>Giá bán</th>
+                                    <th id="mappingPriceHead">Giá bán</th>
                                     <th>Khối lượng</th>
                                     <th>Ghi chú</th>
                                     <th style="width:100px;">Thao tác</th>
@@ -415,12 +443,13 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 </div>
 
                 <div class="mb-3" id="plFormCopyWrap">
-                    <label class="form-label fw-semibold">Sao chép cấu hình từ bảng giá</label>
+                    <label class="form-label fw-semibold">Chép GIÁ từ bảng giá</label>
                     <select class="form-select" id="plFormCopyFrom">
-                        <option value="0">— Tạo bảng giá trống —</option>
+                        <option value="0">— Không chép giá (bảng giá trống) —</option>
                     </select>
                     <div class="form-text">
-                        Chép toàn bộ ĐVT, tỷ lệ quy đổi, giá bán và ĐVT bán chính sang bảng giá mới
+                        Cấu trúc ĐVT + tỉ lệ quy đổi luôn lấy từ <strong>Bảng gốc</strong>.
+                        Chọn 1 bảng giá ở đây để chép thêm <strong>giá bán + ghi chú + ĐVT bán chính</strong>.
                     </div>
                 </div>
 
@@ -701,6 +730,17 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 </h5>
             </div>
             <div class="modal-body">
+                <div class="alert alert-secondary py-2 small mb-3">
+                    Giá được lấy <strong>CHUẨN theo file</strong>. ĐVT không có giá trong file sẽ
+                    <strong>để trống</strong> — không tự suy theo tỉ lệ (bán hàng sẽ sai giá).
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="piDeriveMissing">
+                        <label class="form-check-label" for="piDeriveMissing">
+                            Tự suy giá cho ĐVT thiếu theo tỉ lệ (chỉ bật khi bạn chắc chắn)
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Thông tin file -->
                 <div id="piFileInfo" class="alert alert-info py-2 mb-3 d-none">
                     <i class="bx bx-file me-1"></i>
@@ -787,6 +827,42 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     <i class="bx bx-stop-circle me-1"></i>Dừng lại
                 </button>
                 <button type="button" class="btn btn-secondary" id="piCloseBtn">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =====================================================================
+     Modal: Điền giá theo tỉ lệ cho ĐVT còn trống (sau khi khai tay 1 giá)
+     ===================================================================== -->
+<div class="modal fade" id="fillMissingPriceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title">
+                    <i class="bx bx-calculator me-2 text-primary"></i>Điền giá cho ĐVT còn trống?
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">
+                    Mã <code id="fmpSku"></code> còn <strong id="fmpCount">0</strong> ĐVT chưa có giá.
+                    Suy theo tỉ lệ từ giá vừa nhập (<strong id="fmpFromUnit"></strong> =
+                    <strong id="fmpFromPrice"></strong>):
+                </p>
+                <div style="max-height:260px; overflow-y:auto;">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light"><tr><th>ĐVT</th><th>Tỷ lệ</th><th class="text-end">Giá suy ra</th></tr></thead>
+                        <tbody id="fmpBody"></tbody>
+                    </table>
+                </div>
+                <div class="form-text mt-2">ĐVT đã có giá sẽ KHÔNG bị thay đổi.</div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bỏ qua</button>
+                <button type="button" class="btn btn-primary" id="fmpConfirm">
+                    <i class="bx bx-check me-1"></i>Điền giá
+                </button>
             </div>
         </div>
     </div>
