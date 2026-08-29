@@ -37,9 +37,9 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     Cấu hình tỷ lệ quy đổi và giá bán cho các đơn vị bán (Lốc, Vỉ, Thùng…) để POS tính đúng tồn kho
                 </p>
             </div>
-            <a href="<?php echo esc_url($products_url); ?>" class="btn btn-outline-secondary">
+            <button type="button" class="btn btn-outline-secondary" id="btnHeaderBack">
                 <i class="bx bx-arrow-back me-1"></i> Quay lại
-            </a>
+            </button>
         </div>
     </div>
 

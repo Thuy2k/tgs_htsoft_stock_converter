@@ -645,6 +645,17 @@
         var btnOpenBase = el('btnOpenBase');
         if (btnOpenBase) btnOpenBase.addEventListener('click', enterBaseMode);
 
+        // "Quay lại" ở header: đang trong 1 bảng giá / Bảng gốc → về danh sách bảng
+        // giá; đang ở danh sách rồi → lùi trong lịch sử tab, KHÔNG nhảy sang trang khác.
+        var btnHeaderBack = el('btnHeaderBack');
+        if (btnHeaderBack) btnHeaderBack.addEventListener('click', function () {
+            if (plDom.detailSection && plDom.detailSection.style.display !== 'none') {
+                backToPriceLists();
+            } else {
+                window.history.back();
+            }
+        });
+
         if (plDom.btnNew)        plDom.btnNew.addEventListener('click', function () { openPriceListForm(0); });
         if (plDom.btnBack)       plDom.btnBack.addEventListener('click', backToPriceLists);
         if (plDom.btnEdit)       plDom.btnEdit.addEventListener('click', function () { openPriceListForm(state.priceListId); });
