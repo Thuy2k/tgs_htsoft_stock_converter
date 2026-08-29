@@ -76,11 +76,9 @@
         btnRefreshConfigs:     el('btnRefreshConfigs'),
 
         btnImportExcel:        el('btnImportExcel'),
-        excelImportFile:       el('excelImportFile'),
         btnExportExcel:        el('btnExportExcel'),
 
         btnImportPriceExcel:   el('btnImportPriceExcel'),
-        priceImportFile:       el('priceImportFile'),
 
         btnUnifyDefaultUnit:   el('btnUnifyDefaultUnit'),
     };
@@ -311,9 +309,6 @@
         show('cfgPriceWrap',          true);   // cả 2 chế độ đều có ô giá
         var head = el('mappingPriceHead');
         if (head) { head.style.display = ''; head.textContent = isBase ? 'Giá tham khảo' : 'Giá bán'; }
-        document.querySelectorAll('.tgs-import-guide [data-mode]').forEach(function (g) {
-            g.style.display = (g.getAttribute('data-mode') === (isBase ? 'base' : 'pricelist')) ? '' : 'none';
-        });
         // Cấu trúc (ĐVT / tỷ lệ / khối lượng) chỉ sửa ở Bảng gốc
         [dom.cfgConvertUnit, dom.cfgConvertToHtsoft, dom.cfgUnitWeightKg].forEach(function (inp) {
             if (inp) inp.disabled = !isBase;
@@ -1501,62 +1496,196 @@
         return _eiDom;
     }
 
-    function importExcel(file) {
-        if (!file) return;
+    /* ── Đọc workbook, trả về wb qua callback ─────────────────────────── */
+    function readWorkbook(file, cb) {
         var reader = new FileReader();
         reader.onload = function (e) {
             try {
-                var wb   = XLSX.read(e.target.result, { type: 'array' });
-                var ws   = wb.Sheets[wb.SheetNames[0]];
-                var data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
-                if (data.length < 2) { toast('File Excel trong hoac thieu du lieu.', 'error'); return; }
-
-                var rows = [];
-                for (var i = 1; i < data.length; i++) {
-                    var row   = data[i];
-                    var sku   = String(row[0] || '').trim();
-                    var unit  = String(row[2] || '').trim();
-                    var ratio = parseFloat(String(row[3] || '').replace(',', '.'));
-                    var rawPrice = String(row[4] || '').trim();
-                    var rawCol5 = String(row[5] || '').trim();
-                    var rawCol6 = String(row[6] || '').trim();
-                    var weight = '';
-                    var note = '';
-                    if (rawCol6 !== '') {
-                        weight = rawCol5;
-                        note = rawCol6;
-                    } else if (rawCol5 !== '') {
-                        var col5Number = parseFloat(rawCol5.replace(',', '.'));
-                        if (!isNaN(col5Number)) {
-                            weight = rawCol5;
-                        } else {
-                            note = rawCol5;
-                        }
-                    } else {
-                        note = rawPrice;
-                        rawPrice = '';
-                    }
-                    if (!sku || !ratio || ratio <= 0) continue;
-                    rows.push({
-                        global_product_sku: sku,
-                        convert_unit: unit,
-                        convert_to_htsoft: ratio,
-                        unit_price: rawPrice,
-                        unit_weight_kg: weight,
-                        convert_note: note
-                    });
-                }
-
-                if (!rows.length) { toast('Khong co dong du lieu hop le trong file.', 'error'); return; }
-
-                openBatchImportModal(file.name, rows);
-
+                cb(XLSX.read(new Uint8Array(e.target.result), { type: 'array' }));
             } catch (err) {
-                toast('Khong the doc file Excel: ' + err.message, 'error');
+                toast('Không đọc được file Excel: ' + err.message, 'error');
             }
         };
         reader.readAsArrayBuffer(file);
+    }
+
+    /* ── Parse dữ liệu 1 sheet thành rows cấu trúc Bảng gốc ───────────── */
+    function parseStructRows(data) {
+        var rows = [];
+        for (var i = 1; i < data.length; i++) {
+            var row   = data[i] || [];
+            var sku   = String(row[0] || '').trim();
+            var unit  = String(row[2] || '').trim();
+            var ratio = parseFloat(String(row[3] || '').replace(',', '.'));
+            var rawPrice = String(row[4] || '').trim();
+            var rawCol5 = String(row[5] || '').trim();
+            var rawCol6 = String(row[6] || '').trim();
+            var weight = '';
+            var note = '';
+            if (rawCol6 !== '') {
+                weight = rawCol5;
+                note = rawCol6;
+            } else if (rawCol5 !== '') {
+                var col5Number = parseFloat(rawCol5.replace(',', '.'));
+                if (!isNaN(col5Number)) { weight = rawCol5; } else { note = rawCol5; }
+            } else {
+                note = rawPrice;
+                rawPrice = '';
+            }
+            if (!sku || !ratio || ratio <= 0) continue;
+            rows.push({
+                global_product_sku: sku,
+                convert_unit: unit,
+                convert_to_htsoft: ratio,
+                unit_price: rawPrice,
+                unit_weight_kg: weight,
+                convert_note: note
+            });
+        }
+        return rows;
+    }
+
+    /* ── Parse dữ liệu 1 sheet thành rows giá bán ─────────────────────── */
+    function parsePriceRows(data) {
+        var rows = [];
+        for (var i = 1; i < data.length; i++) {
+            var row  = data[i] || [];
+            var sku  = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
+            var unit = (row[2] !== undefined && row[2] !== null) ? String(row[2]).trim() : '';
+            var raw  = (row[3] !== undefined && row[3] !== null) ? row[3] : '';
+            if (!sku) continue;
+            var priceStr = String(raw).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+            var price    = priceStr !== '' ? parseFloat(priceStr) : null;
+            rows.push({ sku: sku, unit: unit, price: (price > 0 ? price : null) });
+        }
+        rows.sort(function (a, b) {
+            if (a.sku < b.sku) return -1;
+            if (a.sku > b.sku) return 1;
+            if (a.price !== null && b.price === null) return -1;
+            if (a.price === null && b.price !== null) return 1;
+            return 0;
+        });
+        return rows;
+    }
+
+    function sheetData(wb, name) {
+        return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+    }
+
+    /* ════════════════════════════════════════════════════════════════════
+       Pre-modal: chọn file + tab Excel trước khi chạy import
+       ════════════════════════════════════════════════════════════════════ */
+    function makeImportPre(cfg) {
+        // cfg: { preId, fileInputId, chooseId, fileWrapId, fileNameId,
+        //        sheetWrapId, sheetId, rowCountId, startId, parseFn, runFn }
+        var st = { wb: null, fileName: '' };
+        var modal = null;
+        function m() {
+            if (!modal) {
+                var e = document.getElementById(cfg.preId);
+                if (e) modal = new bootstrap.Modal(e);
+            }
+            return modal;
+        }
+        function refresh() {
+            var start = el(cfg.startId);
+            if (!st.wb) { if (start) start.disabled = true; return; }
+            var name = el(cfg.sheetId).value || st.wb.SheetNames[0];
+            var rows;
+            try { rows = cfg.parseFn(sheetData(st.wb, name)); }
+            catch (err) { rows = []; }
+            st.rows = rows;
+            el(cfg.rowCountId).textContent = rows.length;
+            if (start) start.disabled = rows.length === 0;
+        }
+        function onFile(file) {
+            if (!file) return;
+            readWorkbook(file, function (wb) {
+                st.wb = wb;
+                st.fileName = file.name;
+                el(cfg.fileNameId).textContent = file.name;
+                el(cfg.fileWrapId).classList.remove('d-none');
+                var sel = el(cfg.sheetId);
+                sel.innerHTML = '';
+                wb.SheetNames.forEach(function (n) {
+                    var o = document.createElement('option');
+                    o.value = n; o.textContent = n;
+                    sel.appendChild(o);
+                });
+                el(cfg.sheetWrapId).classList.toggle('d-none', wb.SheetNames.length < 2);
+                refresh();
+            });
+        }
+        function open() {
+            st.wb = null; st.fileName = ''; st.rows = null;
+            el(cfg.fileWrapId).classList.add('d-none');
+            el(cfg.sheetWrapId).classList.add('d-none');
+            el(cfg.rowCountId).textContent = '0';
+            var start = el(cfg.startId);
+            if (start) start.disabled = true;
+            var fi = el(cfg.fileInputId);
+            if (fi) fi.value = '';
+            var mm = m();
+            if (mm) mm.show();
+        }
+        // bindings (một lần)
+        var choose = el(cfg.chooseId), fileInput = el(cfg.fileInputId),
+            sheetSel = el(cfg.sheetId), startBtn = el(cfg.startId);
+        if (choose && fileInput) choose.addEventListener('click', function () { fileInput.click(); });
+        if (fileInput) fileInput.addEventListener('change', function (e) {
+            onFile(e.target.files && e.target.files[0]);
+        });
+        if (sheetSel) sheetSel.addEventListener('change', refresh);
+        if (startBtn) startBtn.addEventListener('click', function () {
+            if (!st.rows || !st.rows.length) { toast('Chưa có dòng dữ liệu hợp lệ.', 'error'); return; }
+            var mm = m();
+            var fn = st.fileName, rr = st.rows;
+            if (mm) {
+                var preEl = document.getElementById(cfg.preId);
+                preEl.addEventListener('hidden.bs.modal', function once() {
+                    preEl.removeEventListener('hidden.bs.modal', once);
+                    cfg.runFn(fn, rr);
+                });
+                mm.hide();
+            } else {
+                cfg.runFn(fn, rr);
+            }
+        });
+        return { open: open };
+    }
+
+    var _structPre = null, _pricePre = null;
+    function openStructImportPre() {
+        if (!_structPre) _structPre = makeImportPre({
+            preId: 'structImportPreModal',
+            fileInputId: 'structImportFileInput',
+            chooseId: 'sipChooseBtn',
+            fileWrapId: 'sipFileWrap',
+            fileNameId: 'sipFileName',
+            sheetWrapId: 'sipSheetWrap',
+            sheetId: 'sipSheet',
+            rowCountId: 'sipRowCount',
+            startId: 'sipStart',
+            parseFn: parseStructRows,
+            runFn: openBatchImportModal
+        });
+        _structPre.open();
+    }
+    function openPriceImportPre() {
+        if (!_pricePre) _pricePre = makeImportPre({
+            preId: 'priceImportPreModal',
+            fileInputId: 'priceImportFileInput',
+            chooseId: 'pipChooseBtn',
+            fileWrapId: 'pipFileWrap',
+            fileNameId: 'pipFileName',
+            sheetWrapId: 'pipSheetWrap',
+            sheetId: 'pipSheet',
+            rowCountId: 'pipRowCount',
+            startId: 'pipStart',
+            parseFn: parsePriceRows,
+            runFn: openPriceImportModal
+        });
+        _pricePre.open();
     }
 
     function openBatchImportModal(fileName, rows) {
@@ -1743,47 +1872,6 @@
             };
         }
         return _piDom;
-    }
-
-    function importPriceExcel(file) {
-        var reader = new FileReader();
-        reader.onload = function (e) {
-            var data;
-            try {
-                var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-                var ws = wb.Sheets[wb.SheetNames[0]];
-                data   = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-            } catch (err) {
-                toast('Không đọc được file Excel: ' + err.message, 'error');
-                return;
-            }
-            // Bỏ dòng tiêu đề (dòng 0), lọc dòng có SKU
-            var rows = [];
-            for (var i = 1; i < data.length; i++) {
-                var row = data[i];
-                var sku  = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
-                var unit = (row[2] !== undefined && row[2] !== null) ? String(row[2]).trim() : '';
-                var raw  = (row[3] !== undefined && row[3] !== null) ? row[3] : '';
-                if (!sku) continue;
-                var priceStr = String(raw).replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-                var price    = priceStr !== '' ? parseFloat(priceStr) : null;
-                rows.push({ sku: sku, unit: unit, price: (price > 0 ? price : null) });
-            }
-            // Sắp xếp theo SKU để các dòng cùng mã hàng gần nhau
-            rows.sort(function (a, b) {
-                if (a.sku < b.sku) return -1;
-                if (a.sku > b.sku) return 1;
-                if (a.price !== null && b.price === null) return -1;
-                if (a.price === null && b.price !== null) return 1;
-                return 0;
-            });
-            if (!rows.length) {
-                toast('File không có dữ liệu hợp lệ (cần ít nhất 1 dòng có SKU).', 'error');
-                return;
-            }
-            openPriceImportModal(file.name, rows);
-        };
-        reader.readAsArrayBuffer(file);
     }
 
     function openPriceImportModal(fileName, rows) {
@@ -2332,21 +2420,8 @@
         });
 
         if (dom.btnExportExcel)   dom.btnExportExcel.addEventListener('click', exportExcel);
-        if (dom.btnImportExcel)   dom.btnImportExcel.addEventListener('click', function () {
-            if (dom.excelImportFile) dom.excelImportFile.click();
-        });
-        if (dom.excelImportFile)  dom.excelImportFile.addEventListener('change', function (e) {
-            var file = e.target.files && e.target.files[0];
-            if (file) { importExcel(file); e.target.value = ''; }
-        });
-
-        if (dom.btnImportPriceExcel) dom.btnImportPriceExcel.addEventListener('click', function () {
-            if (dom.priceImportFile) dom.priceImportFile.click();
-        });
-        if (dom.priceImportFile) dom.priceImportFile.addEventListener('change', function (e) {
-            var file = e.target.files && e.target.files[0];
-            if (file) { importPriceExcel(file); e.target.value = ''; }
-        });
+        if (dom.btnImportExcel)   dom.btnImportExcel.addEventListener('click', openStructImportPre);
+        if (dom.btnImportPriceExcel) dom.btnImportPriceExcel.addEventListener('click', openPriceImportPre);
 
         if (dom.btnUnifyDefaultUnit) {
             dom.btnUnifyDefaultUnit.addEventListener('click', openDefaultUnitModal);

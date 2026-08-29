@@ -321,9 +321,6 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <i class="bx bx-refresh"></i>
                                 </button>
                             </div>
-                            <input type="file" id="excelImportFile" accept=".xlsx,.xls" class="d-none">
-                            <input type="file" id="priceImportFile" accept=".xlsx,.xls" class="d-none">
-
                             <button class="btn btn-sm btn-primary js-base-only" type="button" id="btnAddUnitModal">
                                 <i class="bx bx-plus me-1"></i>Thêm đơn vị
                             </button>
@@ -362,34 +359,6 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     </li>
                                 </ul>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hướng dẫn import -->
-                <div class="tgs-import-guide">
-                    <div class="tgs-guide-item" data-mode="base">
-                        <i class="bx bx-info-circle text-primary"></i>
-                        <div>
-                            <strong>Import Excel (cấu trúc):</strong>
-                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Tỷ lệ · E: Giá tham khảo · F: Khối lượng · G: Ghi chú
-                                — khai ở Bảng gốc, mọi bảng giá tự cập nhật theo.</span>
-                        </div>
-                    </div>
-                    <div class="tgs-guide-item" data-mode="pricelist">
-                        <i class="bx bx-dollar text-warning"></i>
-                        <div>
-                            <strong>Import Giá:</strong>
-                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Giá bán.
-                                Lấy CHUẨN theo giá trong file — ĐVT không có giá để trống (không tự suy).</span>
-                        </div>
-                    </div>
-                    <div class="tgs-guide-item" data-mode="base">
-                        <i class="bx bx-check-double text-dark"></i>
-                        <div>
-                            <strong>Thống nhất ĐVT bán chính:</strong>
-                            <span class="text-muted">Quét toàn bộ Bảng gốc, mỗi mã hàng chọn 1 ĐVT ưu tiên cho POS —
-                                tỷ lệ &gt; 1 gần nhất, bỏ qua Thùng / kg, không có thì quay về tỷ lệ 1.</span>
                         </div>
                     </div>
                 </div>
@@ -804,16 +773,6 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 </h5>
             </div>
             <div class="modal-body">
-                <div class="alert alert-secondary py-2 small mb-3">
-                    Giá được lấy <strong>CHUẨN theo file</strong>. ĐVT không có giá trong file sẽ
-                    <strong>để trống</strong> — không tự suy theo tỉ lệ (bán hàng sẽ sai giá).
-                    <div class="form-check mt-2">
-                        <input class="form-check-input" type="checkbox" id="piDeriveMissing">
-                        <label class="form-check-label" for="piDeriveMissing">
-                            Tự suy giá cho ĐVT thiếu theo tỉ lệ (chỉ bật khi bạn chắc chắn)
-                        </label>
-                    </div>
-                </div>
 
                 <!-- Thông tin file -->
                 <div id="piFileInfo" class="alert alert-info py-2 mb-3 d-none">
@@ -999,6 +958,134 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 <button type="button" class="btn btn-secondary" id="bsCancel">Hủy</button>
                 <button type="button" class="btn btn-primary" id="bsStart">
                     <i class="bx bx-play me-1"></i>Bắt đầu đồng bộ
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =====================================================================
+     Modal: Chọn file & tab trước khi Import Excel (cấu trúc — Bảng gốc)
+     ===================================================================== -->
+<div class="modal fade" id="structImportPreModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title">
+                    <i class="bx bx-import me-2 text-success"></i>Import Excel — Cấu trúc Bảng gốc
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-secondary py-2 small mb-3">
+                    <div class="fw-semibold mb-1"><i class="bx bx-columns me-1"></i>Định dạng cột (dòng 1 là tiêu đề, bỏ qua):</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="badge bg-light text-dark border">A · Mã hàng</span>
+                        <span class="badge bg-light text-dark border">B · Tên (bỏ qua)</span>
+                        <span class="badge bg-light text-dark border">C · ĐVT</span>
+                        <span class="badge bg-light text-dark border">D · Tỷ lệ quy đổi</span>
+                        <span class="badge bg-light text-dark border">E · Giá tham khảo</span>
+                        <span class="badge bg-light text-dark border">F · Khối lượng (kg)</span>
+                        <span class="badge bg-light text-dark border">G · Ghi chú</span>
+                    </div>
+                    <div class="mt-2 text-muted">
+                        Khai ở Bảng gốc — mọi bảng giá tự cập nhật cấu trúc theo.
+                        Dòng trùng khít (mã · ĐVT · tỷ lệ · giá · KL · ghi chú) sẽ được <strong>bỏ qua</strong>,
+                        khác thì cập nhật, mới thì thêm.
+                    </div>
+                </div>
+
+                <input type="file" id="structImportFileInput" accept=".xlsx,.xls" class="d-none">
+                <button type="button" class="btn btn-outline-success" id="sipChooseBtn">
+                    <i class="bx bx-folder-open me-1"></i>Chọn file Excel…
+                </button>
+
+                <div id="sipFileWrap" class="mt-3 d-none">
+                    <div class="small text-muted">File đã chọn:</div>
+                    <div class="fw-semibold" id="sipFileName"></div>
+
+                    <div id="sipSheetWrap" class="mt-2 d-none">
+                        <label class="form-label small mb-1 fw-semibold">
+                            <i class="bx bx-spreadsheet me-1"></i>File có nhiều tab — chọn tab cần nhập:
+                        </label>
+                        <select class="form-select form-select-sm" id="sipSheet"></select>
+                    </div>
+
+                    <div class="small mt-2">
+                        Số dòng dữ liệu hợp lệ:
+                        <strong class="text-primary" id="sipRowCount">0</strong>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-success" id="sipStart" disabled>
+                    <i class="bx bx-play me-1"></i>Bắt đầu import
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =====================================================================
+     Modal: Chọn file & tab trước khi Import Giá (bảng giá)
+     ===================================================================== -->
+<div class="modal fade" id="priceImportPreModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title">
+                    <i class="bx bx-dollar me-2 text-warning"></i>Import Giá bán theo ĐVT
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-secondary py-2 small mb-3">
+                    <div class="fw-semibold mb-1"><i class="bx bx-columns me-1"></i>Định dạng cột (dòng 1 là tiêu đề, bỏ qua):</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="badge bg-light text-dark border">A · Mã hàng</span>
+                        <span class="badge bg-light text-dark border">B · Tên (bỏ qua)</span>
+                        <span class="badge bg-light text-dark border">C · ĐVT</span>
+                        <span class="badge bg-light text-dark border">D · Giá bán</span>
+                    </div>
+                    <div class="mt-2 text-muted">
+                        Giá được lấy <strong>CHUẨN theo file</strong>. ĐVT không có trong file → không đụng.
+                        ĐVT có trong file nhưng trống giá → <strong>để trống</strong> (không tự suy theo tỉ lệ).
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="piDeriveMissing">
+                        <label class="form-check-label" for="piDeriveMissing">
+                            Tự suy giá cho ĐVT thiếu theo tỉ lệ (chỉ bật khi bạn chắc chắn)
+                        </label>
+                    </div>
+                </div>
+
+                <input type="file" id="priceImportFileInput" accept=".xlsx,.xls" class="d-none">
+                <button type="button" class="btn btn-outline-warning" id="pipChooseBtn">
+                    <i class="bx bx-folder-open me-1"></i>Chọn file Excel…
+                </button>
+
+                <div id="pipFileWrap" class="mt-3 d-none">
+                    <div class="small text-muted">File đã chọn:</div>
+                    <div class="fw-semibold" id="pipFileName"></div>
+
+                    <div id="pipSheetWrap" class="mt-2 d-none">
+                        <label class="form-label small mb-1 fw-semibold">
+                            <i class="bx bx-spreadsheet me-1"></i>File có nhiều tab — chọn tab cần nhập:
+                        </label>
+                        <select class="form-select form-select-sm" id="pipSheet"></select>
+                    </div>
+
+                    <div class="small mt-2">
+                        Số dòng dữ liệu hợp lệ:
+                        <strong class="text-primary" id="pipRowCount">0</strong>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-warning" id="pipStart" disabled>
+                    <i class="bx bx-play me-1"></i>Bắt đầu import
                 </button>
             </div>
         </div>
