@@ -120,6 +120,23 @@ suy theo tỉ lệ từ giá vừa nhập (`per_smallest = giá / tỉ_lệ`), c
 Bị chặn ở bảng giá (`ajax_save_mapping` với `id = 0` và `ajax_delete_mapping` trả
 lỗi). Làm ở Bảng gốc — mọi bảng giá tự cập nhật theo.
 
+### 4.4b. Xóa = XÓA VĨNH VIỄN
+
+Xóa 1 ĐVT ở Bảng gốc (`ajax_base_delete_mapping`) → `DELETE` cứng dòng base +
+`propagate_base_delete()` **`DELETE` cứng** dòng tương ứng ở MỌI bảng giá (không
+để lại dòng xóa mềm — DB sạch). Bảng giá nào vừa mất ĐVT bán chính của SKU thì tự
+chọn lại.
+
+### 4.5b. Import Excel cấu trúc (Bảng gốc) — chống ghi thừa
+
+`ajax_base_import_excel_rows` so từng dòng với DB:
+- `(SKU, ĐVT)` chưa có → **tạo mới**.
+- Đã có, và tỉ lệ + giá tham khảo + khối lượng + ghi chú **trùng khít** → **bỏ qua**
+  (không đụng `updated_at`, không propagate).
+- Đã có nhưng khác → **cập nhật**.
+
+Chỉ propagate xuống bảng giá khi thực sự có tạo mới / cập nhật.
+
 ### 4.4. ĐVT bán chính
 
 - Nút sao ⭐ trên dòng ĐVT (`ajax_set_default_unit`) → đặt cho **riêng bảng giá**,
@@ -144,14 +161,30 @@ trúc từ Base (giá NULL). Nếu chọn "Chép GIÁ từ bảng giá X" →
 |---|---|---|
 | Vào từ | nút **"Mở Bảng gốc"** | thẻ bảng giá → **"Quản lý ĐVT & giá"** |
 | Form ĐVT | ĐVT / Tỉ lệ / Ghi chú / Khối lượng / ĐVT chính | **ẩn giá? không** — hiện Giá; ĐVT/Tỉ lệ/Khối lượng **khóa** |
-| Bảng tổng | **bỏ cột Giá bán** | có cột Giá bán |
+| Cột giá ở lưới | "Giá tham khảo" | "Giá bán" |
 | Nút | Import Excel (cấu trúc), Xuất Excel, Thống nhất ĐVT, **Đồng bộ Base → tất cả bảng giá** | Import Giá, Xuất Excel, **ĐVT chính theo Bảng gốc** |
-| Xóa ĐVT trên dòng | có | ẩn |
+| Xóa ĐVT trên dòng | có (xóa vĩnh viễn) | ẩn |
 
 `postAjax()` tự đổi `tgs_htsoft_converter_*` → `tgs_htsoft_base_*` khi `mode === 'base'`
 (bảng `BASE_ACTION_MAP`) và không đính kèm `price_list_id`. Các endpoint base trả
 về cùng shape + alias `global_htsoft_unit_base_id AS global_htsoft_stock_convert_id`
 để JS dùng lại nguyên hàm render.
+
+### 5b. Lưới "tải hết" (Excel-like)
+
+Bảng dưới cùng KHÔNG phân trang. Vào Bảng gốc / bảng giá → `loadAllRows()` gọi
+`tgs_htsoft_converter_list_all` / `tgs_htsoft_base_list_all` (1 query LEFT JOIN
+`wp_global_product_name`, ~20k dòng < 1.2s, xếp cạnh nhau theo mã hàng rồi tỉ lệ),
+giữ mảng trong RAM, vẽ theo khung nhìn bằng **`TGSDesignSystem.virtualBody`** (như
+báo cáo `tgs-bc-tk`): DOM chỉ giữ ~40 dòng, cuộn mượt dù 20k+ dòng. Dải ô lọc theo
+cột + nút "Xuất Excel" do `tgs-table-filter.js` / `tgs-erp-ds.js` (nạp sẵn ở
+`main-layout.php`) tự gắn.
+
+**Sửa 1 dòng:** bấm dòng (hoặc nút ✎) → nạp vào **dải sửa nhanh** `#gridEditStrip`
+phía trên lưới (giống lưới phần mềm cũ). "Lưu dòng" → `confirm('Cập nhật dòng
+này?')` → `ajax_save_mapping` → cập nhật tại chỗ trong mảng + vẽ lại. Ở bảng giá
+ĐVT/tỉ lệ/khối lượng bị khoá (chỉ sửa Giá + Ghi chú + ĐVT chính). Nút 🗑 (chỉ Bảng
+gốc) = xóa vĩnh viễn cả ở mọi bảng giá.
 
 ---
 

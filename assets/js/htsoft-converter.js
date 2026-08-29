@@ -25,14 +25,10 @@
         mappingSearchTimer: null,
         selectedProduct:    null,
 
-        // ── Bảng tổng: phân trang phía server ──────────────────────────
-        mappingPage:       1,
-        mappingPerPage:    50,
-        mappingTotal:      0,
-        mappingTotalPages: 0,
+        // ── Lưới "tải hết" (Excel-like) ───────────────────────────────
         mappingLoaded:     false,   // đã tải lần nào chưa
         mappingLoading:    false,   // đang có request chạy → chặn request chồng
-        mappingRows:       [],      // dữ liệu trang hiện tại (cho nút Sửa)
+        allRows:           [],      // TOÀN BỘ dòng của bảng gốc / bảng giá đang mở
     };
 
     /* =========================================================================
@@ -75,8 +71,6 @@
         btnReloadMappings:     el('btnReloadMappings'),
         mappingTableBody:      el('mappingTableBody'),
         mappingTableFooter:    el('mappingTableFooter'),
-        mappingPagination:     el('mappingPagination'),
-        mappingPerPage:        el('mappingPerPage'),
         mappingStaleNotice:    el('mappingStaleNotice'),
         btnReloadStale:        el('btnReloadStale'),
         btnRefreshConfigs:     el('btnRefreshConfigs'),
@@ -116,6 +110,7 @@
         'tgs_htsoft_converter_import_excel_rows':    'tgs_htsoft_base_import_excel_rows',
         'tgs_htsoft_converter_default_scan_prepare': 'tgs_htsoft_base_default_scan_prepare',
         'tgs_htsoft_converter_default_scan_batch':   'tgs_htsoft_base_default_scan_batch',
+        'tgs_htsoft_converter_list_all':             'tgs_htsoft_base_list_all',
     };
 
     function postAjax(action, payload, opts) {
@@ -340,22 +335,15 @@
         // Reset toàn bộ trạng thái của bảng giá trước đó
         state.selectedProduct = null;
         state.mappingLoaded   = false;
-        state.mappingRows     = [];
-        state.mappingPage     = 1;
+        state.allRows         = [];
         if (dom.cfgSku)        dom.cfgSku.value = '';
         if (dom.cfgEmptyState) dom.cfgEmptyState.style.display = '';
         if (dom.cfgContent)    dom.cfgContent.style.display    = 'none';
         if (dom.cfgSearchKeyword) dom.cfgSearchKeyword.value   = '';
+        if (dom.mappingKeyword)   dom.mappingKeyword.value     = '';
         renderSearchResults([]);
         hideStaleNotice();
-        if (dom.mappingTableBody) {
-            dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">'
-                + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
-                + '</td></tr>';
-        }
-        renderMappingsPagination();
-        if (dom.mappingTableFooter) dom.mappingTableFooter.textContent = '';
+        closeEditStrip();
 
         renderPriceListHeader(p);
         applyModeUI();
@@ -363,6 +351,7 @@
         plDom.listSection.style.display   = 'none';
         plDom.detailSection.style.display = '';
         window.scrollTo({ top: 0, behavior: 'smooth' });
+        loadAllRows();
     }
 
     /** Vào màn hình Bảng gốc (khai báo tỉ lệ quy đổi) */
@@ -372,22 +361,15 @@
 
         state.selectedProduct = null;
         state.mappingLoaded   = false;
-        state.mappingRows     = [];
-        state.mappingPage     = 1;
+        state.allRows         = [];
         if (dom.cfgSku)        dom.cfgSku.value = '';
         if (dom.cfgEmptyState) dom.cfgEmptyState.style.display = '';
         if (dom.cfgContent)    dom.cfgContent.style.display    = 'none';
         if (dom.cfgSearchKeyword) dom.cfgSearchKeyword.value   = '';
+        if (dom.mappingKeyword)   dom.mappingKeyword.value     = '';
         renderSearchResults([]);
         hideStaleNotice();
-        if (dom.mappingTableBody) {
-            dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">'
-                + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
-                + '</td></tr>';
-        }
-        renderMappingsPagination();
-        if (dom.mappingTableFooter) dom.mappingTableFooter.textContent = '';
+        closeEditStrip();
 
         plDom.currentName.textContent  = 'Khai báo tỉ lệ quy đổi (Bảng gốc)';
         plDom.currentCode.textContent  = 'BASE';
@@ -398,6 +380,7 @@
         plDom.listSection.style.display   = 'none';
         plDom.detailSection.style.display = '';
         window.scrollTo({ top: 0, behavior: 'smooth' });
+        loadAllRows();
     }
 
     function renderPriceListHeader(p) {
@@ -1067,8 +1050,13 @@
                     toast((res.data && res.data.message) || 'Da xoa.', 'success');
                     var sku = dom.cfgSku ? dom.cfgSku.value : '';
                     if (sku) loadConfigsForSku(sku);
-                    // Gỡ dòng khỏi bảng đang xem, không gọi lại toàn bộ danh sách.
-                    removeMappingRowFromTable(id);
+                    // Gỡ khỏi lưới đang giữ trong RAM
+                    if (state.allRows && state.allRows.length) {
+                        state.allRows = state.allRows.filter(function (x) {
+                            return parseInt(x.global_htsoft_stock_convert_id, 10) !== id;
+                        });
+                        renderGrid();
+                    }
                 } else {
                     toast((res.data && res.data.message) || 'Loi xoa.', 'error');
                 }
@@ -1077,246 +1065,266 @@
     }
 
     /* =========================================================================
-     * Mapping Table (bottom, all configs)
+     * Lưới "tải hết" — Excel-like, vẽ theo khung nhìn (TGSDesignSystem.virtualBody)
      * ====================================================================== */
-    /**
-     * Tải MỘT TRANG dữ liệu. Không bao giờ tải toàn bộ bảng.
-     * @param {number} page trang cần tải (1-based)
-     */
-    function loadMappings(page) {
-        if (state.mappingLoading) return;   // chặn request chồng nhau
+    function numOrNull(v) {
+        return (v === null || v === undefined || v === '') ? null : parseFloat(v);
+    }
 
-        var kw = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim();
-        var p  = parseInt(page, 10);
-        if (!p || p < 1) p = 1;
-
+    /** Tải TOÀN BỘ dòng của bảng gốc / bảng giá đang mở */
+    function loadAllRows() {
         state.mappingLoading = true;
         hideStaleNotice();
-
+        closeEditStrip();
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-3">'
-                + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</td></tr>';
+                '<tr><td colspan="8" class="text-center text-muted py-4">'
+                + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải toàn bộ danh sách…</td></tr>';
         }
+        if (dom.mappingTableFooter) dom.mappingTableFooter.textContent = 'Đang tải…';
 
-        postAjax('tgs_htsoft_converter_list_mappings', {
-            keyword:  kw,
-            page:     p,
-            per_page: state.mappingPerPage,
-        })
-            .then(function (res) {
-                if (res.success) {
-                    var d = res.data || {};
-                    state.mappingRows       = d.mappings || [];
-                    state.mappingTotal      = parseInt(d.total, 10) || 0;
-                    state.mappingPage       = parseInt(d.page, 10) || 1;
-                    state.mappingPerPage    = parseInt(d.per_page, 10) || state.mappingPerPage;
-                    state.mappingTotalPages = parseInt(d.total_pages, 10) || 1;
-                    state.mappingLoaded     = true;
-
-                    renderMappingsTable(state.mappingRows);
-                    renderMappingsPagination();
-                    renderMappingsFooter();
-                } else {
-                    if (dom.mappingTableBody) {
-                        dom.mappingTableBody.innerHTML =
-                            '<tr><td colspan="8" class="text-center text-danger">Lỗi tải dữ liệu.</td></tr>';
-                    }
-                }
-            })
-            .catch(function () {
-                if (dom.mappingTableBody) {
-                    dom.mappingTableBody.innerHTML =
-                        '<tr><td colspan="8" class="text-center text-danger">Lỗi kết nối.</td></tr>';
-                }
-            })
-            .finally(function () { state.mappingLoading = false; });
-    }
-
-    function renderMappingsFooter() {
-        if (!dom.mappingTableFooter) return;
-        if (!state.mappingLoaded) { dom.mappingTableFooter.textContent = ''; return; }
-        if (!state.mappingTotal) { dom.mappingTableFooter.textContent = '0 cấu hình'; return; }
-
-        var from = (state.mappingPage - 1) * state.mappingPerPage + 1;
-        var to   = Math.min(from + state.mappingRows.length - 1, state.mappingTotal);
-        dom.mappingTableFooter.textContent =
-            from + '–' + to + ' / ' + state.mappingTotal.toLocaleString('vi-VN') + ' cấu hình'
-            + ' · Trang ' + state.mappingPage + '/' + state.mappingTotalPages;
-    }
-
-    function pagerButton(label, page, opts) {
-        opts = opts || {};
-        var btn = document.createElement('button');
-        btn.type      = 'button';
-        btn.className = 'btn btn-sm ' + (opts.active ? 'btn-primary' : 'btn-outline-secondary');
-        btn.innerHTML = label;
-        if (opts.disabled) {
-            btn.disabled = true;
-        } else {
-            btn.addEventListener('click', function () { loadMappings(page); });
-        }
-        return btn;
-    }
-
-    function renderMappingsPagination() {
-        if (!dom.mappingPagination) return;
-        dom.mappingPagination.innerHTML = '';
-
-        // Chưa tải lần nào → chỉ hiện 1 nút bấm để tải trang đầu
-        if (!state.mappingLoaded) {
-            var start = document.createElement('button');
-            start.type      = 'button';
-            start.className = 'btn btn-sm btn-outline-primary';
-            start.innerHTML = '<i class="bx bx-list-ul me-1"></i>Xem tất cả';
-            start.addEventListener('click', function () { loadMappings(1); });
-            dom.mappingPagination.appendChild(start);
-            return;
-        }
-
-        if (state.mappingTotalPages <= 1) return;
-
-        var cur   = state.mappingPage;
-        var last  = state.mappingTotalPages;
-        var frag  = document.createDocumentFragment();
-
-        frag.appendChild(pagerButton('<i class="bx bx-chevrons-left"></i>', 1, { disabled: cur <= 1 }));
-        frag.appendChild(pagerButton('<i class="bx bx-chevron-left"></i>', cur - 1, { disabled: cur <= 1 }));
-
-        // Cửa sổ tối đa 5 số trang quanh trang hiện tại
-        var from = Math.max(1, cur - 2);
-        var to   = Math.min(last, from + 4);
-        from     = Math.max(1, to - 4);
-        for (var i = from; i <= to; i++) {
-            frag.appendChild(pagerButton(String(i), i, { active: i === cur }));
-        }
-
-        frag.appendChild(pagerButton('<i class="bx bx-chevron-right"></i>', cur + 1, { disabled: cur >= last }));
-        frag.appendChild(pagerButton('<i class="bx bx-chevrons-right"></i>', last, { disabled: cur >= last }));
-
-        dom.mappingPagination.appendChild(frag);
-    }
-
-    /* ── Thông báo "dữ liệu đã đổi" thay cho việc tự động tải lại ───────── */
-    function markMappingsStale() {
-        if (!state.mappingLoaded) return;          // chưa tải thì không cần nhắc
-        if (!dom.mappingStaleNotice) return;
-        dom.mappingStaleNotice.classList.remove('d-none');
-    }
-
-    function hideStaleNotice() {
-        if (dom.mappingStaleNotice) dom.mappingStaleNotice.classList.add('d-none');
-    }
-
-    /** Xoá 1 dòng khỏi bảng đang hiển thị mà không phải gọi lại server */
-    function removeMappingRowFromTable(id) {
-        if (!dom.mappingTableBody) return;
-        var tr = dom.mappingTableBody.querySelector('tr[data-row-id="' + id + '"]');
-        if (!tr) return;
-        tr.remove();
-        state.mappingRows = state.mappingRows.filter(function (r) {
-            return parseInt(r.global_htsoft_stock_convert_id, 10) !== id;
-        });
-        if (state.mappingTotal > 0) state.mappingTotal--;
-        renderMappingsFooter();
-    }
-
-    function renderMappingsTable(rows) {
-        if (!dom.mappingTableBody) return;
-        if (!rows.length) {
-            dom.mappingTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Không có dữ liệu</td></tr>';
-            return;
-        }
-        var isBase = state.mode === 'base';
-        var html = '';
-        rows.forEach(function (r) {
-            var priceCell = (r.unit_price !== null && r.unit_price !== undefined && r.unit_price !== '')
-                ? '<span class="text-success fw-semibold">' + formatPrice(parseFloat(r.unit_price)) + ' ₫</span>'
-                : '<span class="text-muted">—</span>';
-            var weightCell = (r.unit_weight_kg !== null && r.unit_weight_kg !== undefined && r.unit_weight_kg !== '')
-                ? '<span class="text-info">' + formatWeight(parseFloat(r.unit_weight_kg)) + ' kg</span>'
-                : '<span class="text-muted">—</span>';
-            var unitDisplay = r.convert_unit ? '<strong>' + escHtml(r.convert_unit) + '</strong>' : '<em class="text-muted">Mặc định</em>';
-            if (isDefaultUnit(r)) unitDisplay += '<br>' + DEFAULT_UNIT_BADGE;
-            var delBtn = isBase
-                ? '<button class="btn btn-xs btn-outline-danger" data-tbl-delete="' + r.global_htsoft_stock_convert_id + '" data-tbl-unit="' + escHtml(r.convert_unit || '') + '" title="Xóa"><i class="bx bx-trash"></i></button>'
-                : '';
-            html += '<tr data-row-id="' + r.global_htsoft_stock_convert_id + '">' +
-                '<td><code class="text-primary">' + escHtml(r.global_product_sku) + '</code></td>' +
-                '<td>' + escHtml(r.local_product_name || '') + '</td>' +
-                '<td>' + unitDisplay + '</td>' +
-                '<td><span class="badge bg-light text-dark">× ' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</span></td>' +
-                '<td>' + priceCell + '</td>' +
-                '<td>' + weightCell + '</td>' +
-                '<td><div class="tgs-note-cell">' + escHtml(r.convert_note || '') + '</div></td>' +
-                '<td class="text-nowrap">' +
-                '<button class="btn btn-xs btn-light me-1" data-tbl-edit="' + r.global_htsoft_stock_convert_id + '" title="' + (isBase ? 'Chỉnh sửa' : 'Sửa giá / ghi chú') + '">' +
-                '<i class="bx bx-edit-alt"></i></button>' +
-                delBtn +
-                '</td></tr>';
-        });
-        // Gán HTML 1 lần. Sự kiện dùng event delegation (bind 1 lần ở init)
-        // → không tạo hàng nghìn listener cho mỗi lần render.
-        dom.mappingTableBody.innerHTML = html;
-    }
-
-    function bindMappingTableDelegation() {
-        if (!dom.mappingTableBody) return;
-        dom.mappingTableBody.addEventListener('click', function (e) {
-            var editBtn = e.target.closest ? e.target.closest('[data-tbl-edit]') : null;
-            if (editBtn) {
-                editMappingFromTable(parseInt(editBtn.dataset.tblEdit, 10));
+        postAjax('tgs_htsoft_converter_list_all', {}).then(function (res) {
+            if (!res || !res.success) {
+                if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
+                    '<tr><td colspan="8" class="text-center text-danger py-4">'
+                    + ((res && res.data && res.data.message) || 'Lỗi tải dữ liệu.') + '</td></tr>';
                 return;
             }
-            var delBtn = e.target.closest ? e.target.closest('[data-tbl-delete]') : null;
-            if (delBtn) {
-                deleteMappingFromTable(parseInt(delBtn.dataset.tblDelete, 10), delBtn.dataset.tblUnit);
-            }
+            state.allRows      = (res.data && res.data.rows) || [];
+            state.mappingLoaded = true;
+            renderGrid();
+        }).catch(function () {
+            if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
+                '<tr><td colspan="8" class="text-center text-danger py-4">Lỗi kết nối.</td></tr>';
+        }).finally(function () { state.mappingLoading = false; });
+    }
+
+    function gridVisibleRows() {
+        var kw = (dom.mappingKeyword ? dom.mappingKeyword.value : '').trim().toLowerCase();
+        if (!kw) return state.allRows;
+        return state.allRows.filter(function (r) {
+            return (String(r.global_product_sku || '').toLowerCase().indexOf(kw) !== -1)
+                || (String(r.local_product_name || '').toLowerCase().indexOf(kw) !== -1)
+                || (String(r.convert_unit || '').toLowerCase().indexOf(kw) !== -1);
         });
     }
 
-    function editMappingFromTable(id) {
-        // Dữ liệu trang hiện tại đã có sẵn → không cần gọi server lại
-        var cached = null;
-        for (var i = 0; i < state.mappingRows.length; i++) {
-            if (parseInt(state.mappingRows[i].global_htsoft_stock_convert_id, 10) === id) {
-                cached = state.mappingRows[i];
-                break;
-            }
+    function gridRowHtml(r, i) {
+        var isBase = state.mode === 'base';
+        var price  = numOrNull(r.unit_price);
+        var wkg    = numOrNull(r.unit_weight_kg);
+        var priceCell = (price !== null)
+            ? '<span class="text-success fw-semibold">' + formatPrice(price) + '</span>'
+            : '<span class="text-muted">—</span>';
+        var weightCell = (wkg !== null) ? formatWeight(wkg) : '<span class="text-muted">—</span>';
+        var unitCell = escHtml(r.convert_unit || '') + (isDefaultUnit(r) ? ' <i class="bx bxs-star text-warning" title="ĐVT bán chính"></i>' : '');
+        var ovBadge = (!isBase && (parseInt(r.note_overridden, 10) === 1 || parseInt(r.default_unit_overridden, 10) === 1))
+            ? ' <span class="badge bg-warning text-dark" title="Bảng giá đã sửa riêng">riêng</span>' : '';
+        var delBtn = isBase
+            ? '<button class="btn btn-xs btn-outline-danger" data-g-del="' + r.global_htsoft_stock_convert_id + '" title="Xóa vĩnh viễn"><i class="bx bx-trash"></i></button>'
+            : '';
+        return '<tr data-i="' + i + '" data-id="' + r.global_htsoft_stock_convert_id + '" class="tgs-grid-row" style="cursor:pointer">' +
+            '<td><code class="text-primary">' + escHtml(r.global_product_sku || '') + '</code></td>' +
+            '<td class="text-truncate" style="max-width:280px">' + escHtml(r.local_product_name || '') + '</td>' +
+            '<td>' + unitCell + ovBadge + '</td>' +
+            '<td class="text-end">× ' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</td>' +
+            '<td class="text-end">' + priceCell + '</td>' +
+            '<td class="text-end">' + weightCell + '</td>' +
+            '<td class="text-truncate" style="max-width:220px">' + escHtml(r.convert_note || '') + '</td>' +
+            '<td class="text-nowrap">' +
+              '<button class="btn btn-xs btn-light me-1" data-g-edit="' + r.global_htsoft_stock_convert_id + '" title="Sửa dòng"><i class="bx bx-edit-alt"></i></button>' +
+              delBtn +
+            '</td></tr>';
+    }
+
+    function gridCellText(r, col) {
+        switch (col) {
+            case 0: return String(r.global_product_sku || '');
+            case 1: return String(r.local_product_name || '');
+            case 2: return String(r.convert_unit || '');
+            case 3: return formatRatio(parseFloat(r.convert_to_htsoft));
+            case 4: { var p = numOrNull(r.unit_price); return p === null ? '' : formatPrice(p); }
+            case 5: { var w = numOrNull(r.unit_weight_kg); return w === null ? '' : formatWeight(w); }
+            case 6: return String(r.convert_note || '');
+            default: return '';
         }
-        if (cached) {
-            selectProduct({
-                local_product_sku:  cached.global_product_sku,
-                local_product_name: cached.local_product_name || cached.global_product_sku,
-                local_product_unit: cached.local_product_unit || '',
-                config_count:       0,
-            });
-            setTimeout(function () { editConfig(cached); }, 150);
-            if (dom.cfgContent) dom.cfgContent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function renderGrid() {
+        var table = el('mappingTable');
+        var rows  = gridVisibleRows();
+        var ds    = window.TGSDesignSystem;
+
+        if (dom.mappingTableFooter) {
+            dom.mappingTableFooter.textContent =
+                (rows.length === state.allRows.length)
+                    ? state.allRows.length.toLocaleString('vi-VN') + ' dòng'
+                    : rows.length.toLocaleString('vi-VN') + ' / ' + state.allRows.length.toLocaleString('vi-VN') + ' dòng';
+        }
+
+        if (!state.allRows.length) {
+            if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
+                '<tr><td colspan="8" class="text-center text-muted py-4">Chưa có dòng nào</td></tr>';
             return;
         }
 
-        postAjax('tgs_htsoft_converter_get_mapping', { id: id })
-            .then(function (res) {
-                if (!res.success || !res.data.mapping) {
-                    toast('Khong tim thay cau hinh.', 'error');
-                    return;
+        if (ds && ds.virtualBody && table) {
+            ds.virtualBody({
+                table:    table,
+                rows:     rows,
+                rowHtml:  gridRowHtml,
+                cellText: gridCellText,
+                onFilter: function (filtered) {
+                    if (dom.mappingTableFooter) {
+                        dom.mappingTableFooter.textContent =
+                            (filtered.length === state.allRows.length)
+                                ? state.allRows.length.toLocaleString('vi-VN') + ' dòng'
+                                : filtered.length.toLocaleString('vi-VN') + ' / ' + state.allRows.length.toLocaleString('vi-VN') + ' dòng (đang lọc)';
+                    }
                 }
-                var m = res.data.mapping;
-                selectProduct({
-                    local_product_sku:  m.global_product_sku,
-                    local_product_name: m.local_product_name || m.global_product_sku,
-                    local_product_unit: m.local_product_unit || '',
-                    config_count:       0,
-                });
-                setTimeout(function () { editConfig(m); }, 150);
-                if (dom.cfgContent) dom.cfgContent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            })
-            .catch(function () { toast('Loi ket noi.', 'error'); });
+            });
+        } else if (dom.mappingTableBody) {
+            var buf = [];
+            for (var i = 0; i < rows.length; i++) buf.push(gridRowHtml(rows[i], i));
+            dom.mappingTableBody.innerHTML = buf.join('');
+        }
     }
 
-    function deleteMappingFromTable(id, unit) {
-        deleteConfig(id, unit);
+    /* ── Sự kiện lưới (uỷ quyền, bind 1 lần) ────────────────────────────── */
+    function bindGridEvents() {
+        var table = el('mappingTable');
+        if (!table) return;
+        table.addEventListener('click', function (e) {
+            var t = e.target;
+            var delBtn = t.closest && t.closest('[data-g-del]');
+            if (delBtn) {
+                gridDeleteById(parseInt(delBtn.getAttribute('data-g-del'), 10));
+                return;
+            }
+            var tr = t.closest && t.closest('tr[data-id]');
+            if (tr) {
+                var row = findRowById(parseInt(tr.getAttribute('data-id'), 10));
+                if (row) openEditStrip(row);
+            }
+        });
+    }
+    function findRowById(id) {
+        for (var i = 0; i < state.allRows.length; i++) {
+            if (parseInt(state.allRows[i].global_htsoft_stock_convert_id, 10) === id) return state.allRows[i];
+        }
+        return null;
+    }
+
+    /* ── Dải sửa nhanh 1 dòng ──────────────────────────────────────────── */
+    function openEditStrip(r) {
+        var isBase = state.mode === 'base';
+        el('geId').value       = r.global_htsoft_stock_convert_id;
+        el('geSku').textContent  = r.global_product_sku || '';
+        el('geName').textContent = r.local_product_name || '';
+        el('geUnit').value   = r.convert_unit || '';
+        el('geRatio').value  = (r.convert_to_htsoft != null) ? parseFloat(r.convert_to_htsoft) : '';
+        el('gePrice').value  = (r.unit_price != null && r.unit_price !== '') ? parseFloat(r.unit_price) : '';
+        el('geWeight').value = (r.unit_weight_kg != null && r.unit_weight_kg !== '') ? parseFloat(r.unit_weight_kg) : '';
+        el('geNote').value   = r.convert_note || '';
+        el('geDefault').checked = isDefaultUnit(r);
+        el('gePriceLbl').textContent = isBase ? 'Giá tham khảo' : 'Giá bán';
+        // cấu trúc chỉ sửa ở Bảng gốc
+        el('geUnit').disabled   = !isBase;
+        el('geRatio').disabled  = !isBase;
+        el('geWeight').disabled = !isBase;
+        el('geDelete').classList.toggle('d-none', !isBase);
+        el('gridEditStrip').classList.remove('d-none');
+        (isBase ? el('geUnit') : el('gePrice')).focus();
+    }
+    function closeEditStrip() {
+        var s = el('gridEditStrip');
+        if (s) s.classList.add('d-none');
+    }
+    function saveEditStrip() {
+        var id = parseInt(el('geId').value, 10) || 0;
+        if (!id) return;
+        var row = findRowById(id);
+        if (!row) { closeEditStrip(); return; }
+        var isBase = state.mode === 'base';
+
+        var payload = {
+            id:                 id,
+            global_product_sku: row.global_product_sku,
+            convert_unit:       (el('geUnit').value || '').trim(),
+            convert_to_htsoft:  (el('geRatio').value || '1').toString().replace(',', '.'),
+            unit_price:         (el('gePrice').value || '').toString().replace(',', '.'),
+            unit_weight_kg:     (el('geWeight').value || '').toString().replace(',', '.'),
+            convert_note:       (el('geNote').value || '').trim(),
+            is_default_unit:    el('geDefault').checked ? 1 : 0,
+        };
+        if (isBase && (!payload.convert_unit || parseFloat(payload.convert_to_htsoft) <= 0)) {
+            toast('ĐVT và tỷ lệ quy đổi là bắt buộc.', 'error');
+            return;
+        }
+        if (!confirm('Cập nhật dòng này?')) return;
+
+        var btn = el('geSave'); btn.disabled = true;
+        postAjax('tgs_htsoft_converter_save_mapping', payload).then(function (res) {
+            if (!res || !res.success) {
+                toast((res && res.data && res.data.message) || 'Lỗi lưu.', 'error');
+                return;
+            }
+            toast(res.data.message || 'Đã lưu.', 'success');
+            var d = res.data || {};
+            // cập nhật tại chỗ trong mảng
+            row.convert_unit      = payload.convert_unit || row.convert_unit;
+            row.convert_to_htsoft = payload.convert_to_htsoft;
+            row.unit_price        = payload.unit_price === '' ? null : payload.unit_price;
+            row.unit_weight_kg    = payload.unit_weight_kg === '' ? null : payload.unit_weight_kg;
+            row.convert_note      = payload.convert_note;
+            if (payload.is_default_unit === 1) {
+                state.allRows.forEach(function (x) {
+                    if (x.global_product_sku === row.global_product_sku) x.is_default_unit = (x === row) ? 1 : 0;
+                });
+            }
+            closeEditStrip();
+            renderGrid();
+            // Bảng giá: vừa khai tay 1 giá → hỏi điền các ĐVT còn trống
+            if (!isBase && d.saved_unit_price && parseFloat(d.saved_unit_price) > 0
+                && Array.isArray(d.missing_price_units) && d.missing_price_units.length) {
+                openFillMissingModal(row.global_product_sku, d.saved_unit, d.saved_unit_price, d.saved_unit_ratio, d.missing_price_units);
+            }
+            // Panel chi tiết theo SKU nếu đang mở đúng mã
+            if (dom.cfgSku && dom.cfgSku.value === row.global_product_sku) loadConfigsForSku(row.global_product_sku);
+        }).catch(function () { toast('Loi ket noi.', 'error'); })
+          .finally(function () { btn.disabled = false; });
+    }
+    function gridDeleteById(id) {
+        var row = findRowById(id);
+        if (!row) return;
+        if (state.mode !== 'base') {
+            toast('Xóa ĐVT phải làm ở Bảng gốc.', 'error');
+            return;
+        }
+        if (!confirm('Xóa VĨNH VIỄN ĐVT "' + (row.convert_unit || '') + '" của mã ' + row.global_product_sku
+            + '?\nMọi bảng giá cũng bị xóa dòng này. Không hoàn tác.')) return;
+        postAjax('tgs_htsoft_converter_delete_mapping', { id: id }).then(function (res) {
+            if (!res || !res.success) {
+                toast((res && res.data && res.data.message) || 'Lỗi xóa.', 'error');
+                return;
+            }
+            toast((res.data && res.data.message) || 'Đã xóa.', 'success');
+            state.allRows = state.allRows.filter(function (x) {
+                return parseInt(x.global_htsoft_stock_convert_id, 10) !== id;
+            });
+            closeEditStrip();
+            renderGrid();
+            if (dom.cfgSku && dom.cfgSku.value === row.global_product_sku) loadConfigsForSku(row.global_product_sku);
+        }).catch(function () { toast('Loi ket noi.', 'error'); });
+    }
+
+    /* ── "Dữ liệu đã đổi" — nhắc tải lại lưới ─────────────────────────── */
+    function markMappingsStale() {
+        if (!state.mappingLoaded || !dom.mappingStaleNotice) return;
+        dom.mappingStaleNotice.classList.remove('d-none');
+    }
+    function hideStaleNotice() {
+        if (dom.mappingStaleNotice) dom.mappingStaleNotice.classList.add('d-none');
     }
 
     /* =========================================================================
@@ -2215,32 +2223,27 @@
             if (sku) loadConfigsForSku(sku);
         });
 
-        if (dom.btnReloadMappings) dom.btnReloadMappings.addEventListener('click', function () {
-            loadMappings(state.mappingLoaded ? state.mappingPage : 1);
-        });
-        if (dom.btnReloadStale) dom.btnReloadStale.addEventListener('click', function () {
-            loadMappings(state.mappingPage);
-        });
-        if (dom.mappingPerPage) {
-            dom.mappingPerPage.addEventListener('change', function () {
-                state.mappingPerPage = parseInt(dom.mappingPerPage.value, 10) || 50;
-                if (state.mappingLoaded) loadMappings(1);
-            });
-        }
+        if (dom.btnReloadMappings) dom.btnReloadMappings.addEventListener('click', loadAllRows);
+        if (dom.btnReloadStale)  dom.btnReloadStale.addEventListener('click', loadAllRows);
+        var btnReloadStale2 = el('btnReloadStale2');
+        if (btnReloadStale2) btnReloadStale2.addEventListener('click', loadAllRows);
+
         if (dom.mappingKeyword) {
-            dom.mappingKeyword.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') { clearTimeout(state.mappingSearchTimer); loadMappings(1); }
-            });
             dom.mappingKeyword.addEventListener('input', function () {
                 clearTimeout(state.mappingSearchTimer);
-                var kw = dom.mappingKeyword.value.trim();
-                // Chưa tải bảng lần nào + ô tìm kiếm trống → không tự động gọi server.
-                if (!state.mappingLoaded && kw === '') return;
-                state.mappingSearchTimer = setTimeout(function () { loadMappings(1); }, 500);
+                state.mappingSearchTimer = setTimeout(renderGrid, 250);
             });
         }
 
-        bindMappingTableDelegation();
+        bindGridEvents();
+
+        // Dải sửa nhanh 1 dòng
+        var geSave = el('geSave'), geCancel = el('geCancel'), geDelete = el('geDelete');
+        if (geSave)   geSave.addEventListener('click', saveEditStrip);
+        if (geCancel) geCancel.addEventListener('click', closeEditStrip);
+        if (geDelete) geDelete.addEventListener('click', function () {
+            gridDeleteById(parseInt(el('geId').value, 10) || 0);
+        });
 
         if (dom.btnExportExcel)   dom.btnExportExcel.addEventListener('click', exportExcel);
         if (dom.btnImportExcel)   dom.btnImportExcel.addEventListener('click', function () {
@@ -2367,21 +2370,8 @@
         bindPriceListEvents();
         initScanner();
 
-        // Vào trang là màn hình DANH SÁCH BẢNG GIÁ, chọn bảng giá mới cấu hình
+        // Vào trang là màn hình DANH SÁCH BẢNG GIÁ; lưới tự tải khi mở Bảng gốc / bảng giá
         loadPriceLists();
-
-        if (dom.mappingPerPage) {
-            state.mappingPerPage = parseInt(dom.mappingPerPage.value, 10) || 50;
-        }
-
-        // Không tự load — hiện placeholder, chờ user bấm "Xem tất cả"
-        if (dom.mappingTableBody) {
-            dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">'
-                + '<i class="bx bx-table me-1"></i>Bấm <strong>Xem tất cả</strong> để tải danh sách.'
-                + '</td></tr>';
-        }
-        renderMappingsPagination();
     }
 
     if (document.readyState === 'loading') {

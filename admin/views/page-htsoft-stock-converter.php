@@ -373,9 +373,54 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     </button>
                 </div>
 
+                <!-- ── Dải sửa nhanh 1 dòng (giống lưới phần mềm cũ) ────── -->
+                <div id="gridEditStrip" class="p-2 border-top border-bottom bg-light d-none">
+                    <input type="hidden" id="geId">
+                    <div class="d-flex align-items-end flex-wrap gap-2">
+                        <div style="min-width:150px;">
+                            <label class="form-label small mb-0 text-muted">Mã hàng</label>
+                            <div class="fw-semibold"><code id="geSku">—</code></div>
+                            <div class="small text-muted text-truncate" id="geName" style="max-width:240px;"></div>
+                        </div>
+                        <div style="width:110px;">
+                            <label class="form-label small mb-0">ĐVT bán</label>
+                            <input type="text" class="form-control form-control-sm" id="geUnit">
+                        </div>
+                        <div style="width:90px;">
+                            <label class="form-label small mb-0">Tỷ lệ</label>
+                            <input type="number" class="form-control form-control-sm" id="geRatio" min="0" step="1">
+                        </div>
+                        <div style="width:120px;">
+                            <label class="form-label small mb-0" id="gePriceLbl">Giá bán</label>
+                            <input type="number" class="form-control form-control-sm" id="gePrice" min="0" step="1000">
+                        </div>
+                        <div style="width:100px;">
+                            <label class="form-label small mb-0">KL (kg)</label>
+                            <input type="number" class="form-control form-control-sm" id="geWeight" min="0" step="0.001">
+                        </div>
+                        <div style="flex:1; min-width:160px;">
+                            <label class="form-label small mb-0">Ghi chú</label>
+                            <input type="text" class="form-control form-control-sm" id="geNote">
+                        </div>
+                        <div class="form-check mb-1 ms-1">
+                            <input class="form-check-input" type="checkbox" id="geDefault">
+                            <label class="form-check-label small" for="geDefault">ĐVT chính</label>
+                        </div>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-sm btn-primary" id="geSave">
+                                <i class="bx bx-save me-1"></i>Lưu dòng
+                            </button>
+                            <button type="button" class="btn btn-sm btn-light" id="geCancel">Bỏ</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger d-none" id="geDelete">
+                                <i class="bx bx-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="tgs-table-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="mappingTable">
+                    <div id="gridScroll" style="overflow:auto; max-height:60vh;">
+                        <table class="table table-hover table-sm mb-0" id="mappingTable">
                             <thead>
                                 <tr>
                                     <th>Mã hàng</th>
@@ -385,7 +430,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <th id="mappingPriceHead">Giá bán</th>
                                     <th>Khối lượng</th>
                                     <th>Ghi chú</th>
-                                    <th style="width:100px;">Thao tác</th>
+                                    <th style="width:96px;">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody id="mappingTableBody"></tbody>
@@ -393,15 +438,10 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                     </div>
                 </div>
                 <div class="tgs-table-footer">
-                    <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <div class="text-muted small" id="mappingTableFooter"></div>
-                        <select class="form-select form-select-sm" id="mappingPerPage" style="width:auto;">
-                            <option value="50" selected>50 dòng/trang</option>
-                            <option value="100">100 dòng/trang</option>
-                            <option value="200">200 dòng/trang</option>
-                        </select>
-                    </div>
-                    <nav id="mappingPagination" class="d-flex align-items-center gap-1 flex-wrap"></nav>
+                    <div class="text-muted small" id="mappingTableFooter"></div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnReloadStale2">
+                        <i class="bx bx-refresh me-1"></i>Tải lại
+                    </button>
                 </div>
             </div>
         </div><!-- /.tgs-table-section -->
