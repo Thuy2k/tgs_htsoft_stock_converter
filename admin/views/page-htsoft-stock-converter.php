@@ -339,7 +339,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                         <i class="bx bx-info-circle text-primary"></i>
                         <div>
                             <strong>Import Excel (cấu trúc):</strong>
-                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Tỷ lệ · E: (bỏ qua) · F: Khối lượng · G: Ghi chú
+                            <span class="text-muted">A: Mã hàng · B: Tên · C: ĐVT · D: Tỷ lệ · E: Giá tham khảo · F: Khối lượng · G: Ghi chú
                                 — khai ở Bảng gốc, mọi bảng giá tự cập nhật theo.</span>
                         </div>
                     </div>
@@ -862,6 +862,69 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bỏ qua</button>
                 <button type="button" class="btn btn-primary" id="fmpConfirm">
                     <i class="bx bx-check me-1"></i>Điền giá
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =====================================================================
+     Modal: Đồng bộ Bảng gốc → tất cả bảng giá
+     ===================================================================== -->
+<div class="modal fade" id="baseSyncModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-3">
+                <h5 class="modal-title">
+                    <i class="bx bx-sync me-2 text-primary"></i>Đồng bộ Bảng gốc → tất cả bảng giá
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" id="bsCloseX"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bsIntro">
+                    <p class="small text-muted">
+                        Chiếu cấu trúc (ĐVT + tỉ lệ quy đổi + ĐVT bán chính) từ Bảng gốc xuống TẤT CẢ bảng giá.
+                        Bảng giá đang override ĐVT bán chính / ghi chú thì giữ nguyên phần đó.
+                    </p>
+                    <label class="form-label fw-semibold mb-1">Giá tham khảo</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="bsPriceMode" id="bsPriceNone" value="none" checked>
+                        <label class="form-check-label" for="bsPriceNone">
+                            Không đụng giá — chỉ đồng bộ cấu trúc
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="bsPriceMode" id="bsPriceFill" value="fill">
+                        <label class="form-check-label" for="bsPriceFill">
+                            Điền giá tham khảo cho ĐVT <strong>đang trống giá</strong> (không đè giá đã khai)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="bsPriceMode" id="bsPriceOverwrite" value="overwrite">
+                        <label class="form-check-label text-danger" for="bsPriceOverwrite">
+                            <strong>Ghi đè toàn bộ</strong> giá của mọi bảng giá bằng giá tham khảo
+                        </label>
+                    </div>
+                </div>
+
+                <div id="bsProgressWrap" class="d-none">
+                    <div class="d-flex justify-content-between mb-1 small">
+                        <span id="bsProgressText" class="text-muted">Đang đồng bộ…</span>
+                        <span id="bsProgressPct" class="fw-semibold">0%</span>
+                    </div>
+                    <div class="progress mb-2" style="height:18px;border-radius:6px;">
+                        <div id="bsProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                             role="progressbar" style="width:0%"></div>
+                    </div>
+                    <div class="small text-muted" id="bsProgressCount"></div>
+                </div>
+
+                <div id="bsResult" class="alert alert-success py-2 mt-2 d-none"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="bsCancel">Hủy</button>
+                <button type="button" class="btn btn-primary" id="bsStart">
+                    <i class="bx bx-play me-1"></i>Bắt đầu đồng bộ
                 </button>
             </div>
         </div>

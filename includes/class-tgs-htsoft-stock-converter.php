@@ -2795,16 +2795,18 @@ class TGS_HTSoft_Stock_Converter
 
     /**
      * Chiếu cấu trúc Base → các bảng giá.
-     *   - Chèn mọi dòng (SKU, ĐVT) của base còn thiếu (giá = NULL).
+     *   - Chèn mọi dòng (SKU, ĐVT) của base còn thiếu.
      *   - Đồng bộ tỉ lệ / khối lượng cho dòng đã có.
      *   - Ghi chú & ĐVT bán chính: chỉ ghi đè khi bảng giá CHƯA override.
-     *   - unit_price KHÔNG bao giờ bị đụng.
      *
      * @param string[]|null $skus         Lọc theo SKU (null = toàn bộ base)
      * @param int           $only_list_id Chỉ chiếu vào 1 bảng giá (0 = tất cả)
+     * @param string        $price_mode   'none'      = KHÔNG đụng unit_price (mặc định),
+     *                                     'fill'      = điền giá tham khảo cho ĐVT đang trống giá,
+     *                                     'overwrite' = ghi đè unit_price bằng giá tham khảo
      * @return int Số dòng bị ảnh hưởng
      */
-    public static function propagate_base_to_price_lists($skus = null, $only_list_id = 0)
+    public static function propagate_base_to_price_lists($skus = null, $only_list_id = 0, $price_mode = 'none')
     {
         global $wpdb;
 
@@ -2832,6 +2834,18 @@ class TGS_HTSoft_Stock_Converter
             $sku_args  = $skus;
         }
 
+        // Cột unit_price trong SELECT + nhánh cập nhật theo $price_mode
+        if ($price_mode === 'overwrite' || $price_mode === 'fill') {
+            $price_select = 'b.unit_price';
+            $price_update = ($price_mode === 'overwrite')
+                ? "unit_price = VALUES(unit_price),"
+                : "unit_price = IF({$conv}.unit_price IS NULL OR {$conv}.unit_price = 0,
+                                   VALUES(unit_price), {$conv}.unit_price),";
+        } else {
+            $price_select = 'NULL';        // dòng mới: giá trống
+            $price_update = '';            // dòng cũ: giữ nguyên unit_price
+        }
+
         $touched = 0;
         foreach ($list_ids as $lid) {
             $sql = "INSERT INTO {$conv}
@@ -2840,7 +2854,7 @@ class TGS_HTSoft_Stock_Converter
                          note_overridden, default_unit_overridden,
                          user_id, is_deleted, created_at, updated_at)
                     SELECT %d, b.global_product_sku, b.convert_unit, b.convert_from_tgs, b.convert_to_htsoft,
-                           b.convert_note, NULL, b.unit_weight_kg, b.is_default_unit,
+                           b.convert_note, {$price_select}, b.unit_weight_kg, b.is_default_unit,
                            0, 0,
                            %d, 0, %s, %s
                     FROM {$base} b
@@ -2849,6 +2863,7 @@ class TGS_HTSoft_Stock_Converter
                         convert_from_tgs = VALUES(convert_from_tgs),
                         convert_to_htsoft = VALUES(convert_to_htsoft),
                         unit_weight_kg = VALUES(unit_weight_kg),
+                        {$price_update}
                         convert_note = IF({$conv}.note_overridden = 1,
                                           {$conv}.convert_note, VALUES(convert_note)),
                         is_default_unit = IF({$conv}.default_unit_overridden = 1,
@@ -3038,61 +3053,24 @@ class TGS_HTSoft_Stock_Converter
         return $rows;
     }
 
-    /** Toàn bộ dòng base đang hoạt động của 1 SKU */
+    /**
+     * Toàn bộ dòng base đang hoạt động của 1 SKU.
+     * Alias id sang global_htsoft_stock_convert_id để dùng chung pick_default_config().
+     */
     private static function fetch_base_active_configs($sku)
     {
         global $wpdb;
         $base = self::table_unit_base();
         return $wpdb->get_results($wpdb->prepare(
-            "SELECT global_htsoft_unit_base_id, convert_unit, convert_to_htsoft, is_default_unit
+            "SELECT global_htsoft_unit_base_id,
+                    global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
+                    convert_unit, convert_to_htsoft, unit_price, is_default_unit
              FROM {$base}
              WHERE BINARY global_product_sku = %s
                AND (is_deleted = 0 OR is_deleted IS NULL)
              ORDER BY global_htsoft_unit_base_id ASC",
             (string) $sku
         ), ARRAY_A) ?: [];
-    }
-
-    /**
-     * Chọn ĐVT bán chính cho BASE (không xét giá — base không có giá).
-     * Quy tắc: bỏ ĐVT Thùng/kg → tỉ lệ > 1 nhỏ nhất → nếu không có thì tỉ lệ = 1.
-     *
-     * @return array|null Dòng base được chọn
-     */
-    private static function pick_base_default_config($rows)
-    {
-        $bigger = [];
-        $ones   = [];
-        foreach ($rows as $r) {
-            if (self::is_excluded_unit($r['convert_unit'] ?? '')) {
-                continue;
-            }
-            $ratio = (float) ($r['convert_to_htsoft'] ?? 1);
-            if ($ratio <= 0) {
-                continue;
-            }
-            if ($ratio > 1 + self::RATIO_EPS) {
-                $bigger[] = $r;
-            } else {
-                $ones[] = $r;
-            }
-        }
-
-        usort($bigger, function ($a, $b) {
-            $ra = (float) $a['convert_to_htsoft'];
-            $rb = (float) $b['convert_to_htsoft'];
-            if (abs($ra - $rb) > self::RATIO_EPS) {
-                return ($ra < $rb) ? -1 : 1;
-            }
-            return ((int) $a['global_htsoft_unit_base_id']) <=> ((int) $b['global_htsoft_unit_base_id']);
-        });
-        usort($ones, function ($a, $b) {
-            return ((int) $a['global_htsoft_unit_base_id']) <=> ((int) $b['global_htsoft_unit_base_id']);
-        });
-
-        if (!empty($bigger)) { return $bigger[0]; }
-        if (!empty($ones))   { return $ones[0]; }
-        return null;
     }
 
     /** Đặt 1 dòng base làm ĐVT bán chính của SKU, các dòng khác về 0 */
@@ -3141,7 +3119,7 @@ class TGS_HTSoft_Stock_Converter
             "SELECT global_htsoft_unit_base_id,
                     global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
                     global_product_sku, convert_unit,
-                    convert_from_tgs, convert_to_htsoft, convert_note,
+                    convert_from_tgs, convert_to_htsoft, unit_price, convert_note,
                     unit_weight_kg, is_default_unit, updated_at
              FROM {$base}
              WHERE BINARY global_product_sku = %s
@@ -3178,6 +3156,16 @@ class TGS_HTSoft_Stock_Converter
         $weight    = self::parse_optional_decimal($_POST['unit_weight_kg'] ?? '');
         $is_def    = !empty($_POST['is_default_unit']) ? 1 : 0;
 
+        // Giá tham khảo (tuỳ chọn, NULL nếu để trống)
+        $raw_price  = isset($_POST['unit_price']) ? trim(wp_unslash($_POST['unit_price'])) : '';
+        $unit_price = null;
+        if ($raw_price !== '') {
+            $cleaned = (float) str_replace(',', '.', $raw_price);
+            if ($cleaned >= 0) {
+                $unit_price = $cleaned;
+            }
+        }
+
         if ($sku === '') {
             self::error('Thiếu SKU sản phẩm.');
             return;
@@ -3198,6 +3186,7 @@ class TGS_HTSoft_Stock_Converter
             'convert_unit'       => $unit,
             'convert_from_tgs'   => 1,
             'convert_to_htsoft'  => $to_htsoft,
+            'unit_price'         => $unit_price,
             'convert_note'       => $note,
             'unit_weight_kg'     => $weight,
             'is_default_unit'    => $is_def,
@@ -3206,7 +3195,8 @@ class TGS_HTSoft_Stock_Converter
             'deleted_at'         => null,
             'updated_at'         => $now,
         ];
-        $formats = ['%s', '%s', '%f', '%f', '%s', $weight !== null ? '%f' : '%s', '%d', '%d', '%d', '%s', '%s'];
+        $formats = ['%s', '%s', '%f', '%f', $unit_price !== null ? '%f' : '%s', '%s',
+                    $weight !== null ? '%f' : '%s', '%d', '%d', '%d', '%s', '%s'];
 
         if ($id > 0) {
             $conflict = $wpdb->get_var($wpdb->prepare(
@@ -3282,7 +3272,7 @@ class TGS_HTSoft_Stock_Converter
 
         // Chọn lại ĐVT bán chính ở base nếu vừa xóa đúng dòng đó
         if ((int) $row['is_default_unit'] === 1) {
-            $winner = self::pick_base_default_config(self::fetch_base_active_configs($sku));
+            $winner = self::pick_default_config(self::fetch_base_active_configs($sku));
             if ($winner) {
                 self::apply_base_default_for_sku($sku, (int) $winner['global_htsoft_unit_base_id']);
             }
@@ -3350,7 +3340,7 @@ class TGS_HTSoft_Stock_Converter
             "SELECT global_htsoft_unit_base_id,
                     global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
                     global_product_sku, convert_unit,
-                    convert_from_tgs, convert_to_htsoft, convert_note,
+                    convert_from_tgs, convert_to_htsoft, unit_price, convert_note,
                     unit_weight_kg, is_default_unit
              FROM {$base} WHERE global_htsoft_unit_base_id = %d
                AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1",
@@ -3417,7 +3407,7 @@ class TGS_HTSoft_Stock_Converter
         $rows_sql = "SELECT b.global_htsoft_unit_base_id,
                             b.global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
                             b.global_product_sku, b.convert_unit,
-                            b.convert_from_tgs, b.convert_to_htsoft, b.convert_note,
+                            b.convert_from_tgs, b.convert_to_htsoft, b.unit_price, b.convert_note,
                             b.unit_weight_kg, b.is_default_unit, b.updated_at
                      FROM {$base} b
                      WHERE {$where}
@@ -3446,7 +3436,7 @@ class TGS_HTSoft_Stock_Converter
 
         $base = self::table_unit_base();
         $rows = $wpdb->get_results(
-            "SELECT global_product_sku, convert_unit, convert_to_htsoft, convert_note,
+            "SELECT global_product_sku, convert_unit, convert_to_htsoft, unit_price, convert_note,
                     unit_weight_kg, is_default_unit
              FROM {$base}
              WHERE (is_deleted = 0 OR is_deleted IS NULL)
@@ -3468,6 +3458,8 @@ class TGS_HTSoft_Stock_Converter
                 'local_product_name' => (string) ($row['local_product_name'] ?? ''),
                 'convert_unit'       => (string) ($row['convert_unit'] ?? ''),
                 'convert_to_htsoft'  => (float) self::parse_positive_decimal($row['convert_to_htsoft'], 1),
+                'unit_price'         => ($row['unit_price'] !== null && $row['unit_price'] !== '')
+                                            ? (float) $row['unit_price'] : null,
                 'unit_weight_kg'     => ($row['unit_weight_kg'] !== null && $row['unit_weight_kg'] !== '')
                                             ? (float) $row['unit_weight_kg'] : null,
                 'convert_note'       => (string) ($row['convert_note'] ?? ''),
@@ -3480,7 +3472,7 @@ class TGS_HTSoft_Stock_Converter
 
     /**
      * Import cấu trúc vào BASE (batch). Cột: A Mã · B Tên · C ĐVT · D Tỉ lệ ·
-     * E (bỏ qua — base không có giá) · F Khối lượng · G Ghi chú.
+     * E Giá tham khảo · F Khối lượng · G Ghi chú.
      * Mỗi lô xong → propagate các SKU trong lô.
      */
     public function ajax_base_import_excel_rows()
@@ -3512,9 +3504,10 @@ class TGS_HTSoft_Stock_Converter
             $unit = isset($item['convert_unit']) ? sanitize_text_field((string) $item['convert_unit']) : '';
             if ($sku === '') { $skipped++; continue; }
 
-            $to_htsoft = self::parse_positive_decimal($item['convert_to_htsoft'] ?? 1, 1);
-            $note      = isset($item['convert_note']) ? sanitize_text_field((string) $item['convert_note']) : '';
-            $weight    = self::parse_optional_decimal($item['unit_weight_kg'] ?? '');
+            $to_htsoft  = self::parse_positive_decimal($item['convert_to_htsoft'] ?? 1, 1);
+            $note       = isset($item['convert_note']) ? sanitize_text_field((string) $item['convert_note']) : '';
+            $weight     = self::parse_optional_decimal($item['unit_weight_kg'] ?? '');
+            $unit_price = self::parse_optional_decimal($item['unit_price'] ?? '');
             if ($note === '') {
                 $note = self::build_default_note($unit, $to_htsoft);
             }
@@ -3524,6 +3517,7 @@ class TGS_HTSoft_Stock_Converter
                 'convert_unit'       => $unit,
                 'convert_from_tgs'   => 1,
                 'convert_to_htsoft'  => $to_htsoft,
+                'unit_price'         => $unit_price,
                 'convert_note'       => $note,
                 'unit_weight_kg'     => $weight,
                 'user_id'            => $uid,
@@ -3531,7 +3525,8 @@ class TGS_HTSoft_Stock_Converter
                 'deleted_at'         => null,
                 'updated_at'         => $now,
             ];
-            $formats = ['%s', '%s', '%f', '%f', '%s', $weight !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
+            $formats = ['%s', '%s', '%f', '%f', $unit_price !== null ? '%f' : '%s', '%s',
+                        $weight !== null ? '%f' : '%s', '%d', '%d', '%s', '%s'];
 
             $existing = $wpdb->get_var($wpdb->prepare(
                 "SELECT global_htsoft_unit_base_id FROM {$base}
@@ -3611,8 +3606,10 @@ class TGS_HTSoft_Stock_Converter
 
         $ph   = implode(',', array_fill(0, count($skus), '%s'));
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT global_htsoft_unit_base_id, global_product_sku, convert_unit,
-                    convert_to_htsoft, is_default_unit
+            "SELECT global_htsoft_unit_base_id,
+                    global_htsoft_unit_base_id AS global_htsoft_stock_convert_id,
+                    global_product_sku, convert_unit,
+                    convert_to_htsoft, unit_price, is_default_unit
              FROM {$base}
              WHERE global_product_sku IN ({$ph})
                AND (is_deleted = 0 OR is_deleted IS NULL)
@@ -3639,7 +3636,7 @@ class TGS_HTSoft_Stock_Converter
             }
             if ($only_missing && count($cur) === 1) { $unchanged++; continue; }
 
-            $winner    = self::pick_base_default_config($grp);
+            $winner    = self::pick_default_config($grp); // công thức gốc: tỷ lệ > 1 gần nhất VÀ có giá…
             $winner_id = $winner ? (int) $winner['global_htsoft_unit_base_id'] : 0;
             if (!$winner_id) { $no_candidate++; }
 
@@ -3657,7 +3654,8 @@ class TGS_HTSoft_Stock_Converter
                             'sku'   => $sku,
                             'unit'  => (string) $winner['convert_unit'],
                             'ratio' => (float) $winner['convert_to_htsoft'],
-                            'price' => null,
+                            'price' => ($winner['unit_price'] !== null && $winner['unit_price'] !== '')
+                                        ? (float) $winner['unit_price'] : null,
                         ];
                     }
                 }
@@ -3724,6 +3722,12 @@ class TGS_HTSoft_Stock_Converter
         $limit  = isset($_POST['batch_size']) ? (int) $_POST['batch_size'] : self::DEFAULT_SCAN_BATCH_SIZE;
         $limit  = max(10, min(self::DEFAULT_SCAN_BATCH_MAX, $limit));
 
+        // 'none' (mặc định) | 'fill' (chỉ điền ĐVT trống giá) | 'overwrite' (ghi đè)
+        $price_mode = isset($_POST['sync_prices']) ? (string) $_POST['sync_prices'] : 'none';
+        if (!in_array($price_mode, ['none', 'fill', 'overwrite'], true)) {
+            $price_mode = 'none';
+        }
+
         $skus = $wpdb->get_col($wpdb->prepare(
             "SELECT DISTINCT global_product_sku FROM {$base}
              WHERE (is_deleted = 0 OR is_deleted IS NULL)
@@ -3738,7 +3742,7 @@ class TGS_HTSoft_Stock_Converter
             return;
         }
 
-        $affected  = self::propagate_base_to_price_lists(array_map('strval', $skus));
+        $affected  = self::propagate_base_to_price_lists(array_map('strval', $skus), 0, $price_mode);
         $processed = count($skus);
 
         self::success([

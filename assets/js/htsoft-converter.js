@@ -313,9 +313,9 @@
         show('btnImportPriceExcel',   !isBase);
         show('btnResetDefaultToBase', !isBase);
         show('plDetailActions',       !isBase);
-        show('cfgPriceWrap',          !isBase);
+        show('cfgPriceWrap',          true);   // cả 2 chế độ đều có ô giá
         var head = el('mappingPriceHead');
-        if (head) head.style.display = isBase ? 'none' : '';
+        if (head) { head.style.display = ''; head.textContent = isBase ? 'Giá tham khảo' : 'Giá bán'; }
         document.querySelectorAll('.tgs-import-guide [data-mode]').forEach(function (g) {
             g.style.display = (g.getAttribute('data-mode') === (isBase ? 'base' : 'pricelist')) ? '' : 'none';
         });
@@ -323,8 +323,10 @@
         [dom.cfgConvertUnit, dom.cfgConvertToHtsoft, dom.cfgUnitWeightKg].forEach(function (inp) {
             if (inp) inp.disabled = !isBase;
         });
+        var priceLabel = document.querySelector('#cfgPriceWrap .form-label');
+        if (priceLabel) priceLabel.textContent = isBase ? 'Giá tham khảo (VNĐ)' : 'Giá bán (VNĐ)';
         var hint = el('cfgPriceHint');
-        if (hint) hint.textContent = isBase ? '' : 'Giá riêng của bảng giá này';
+        if (hint) hint.textContent = isBase ? 'Dùng cho "Thống nhất ĐVT bán chính" + đồng bộ xuống bảng giá' : 'Giá riêng của bảng giá này';
     }
 
     /** Vào màn hình cấu hình của 1 bảng giá */
@@ -806,7 +808,7 @@
         var isBase = state.mode === 'base';
         var html = '<div class="table-responsive"><table class="table table-sm tgs-config-table mb-0">' +
             '<thead class="table-light"><tr>' +
-            '<th>Đơn vị tính</th><th>Tỷ lệ</th>' + (isBase ? '' : '<th>Giá bán</th>') +
+            '<th>Đơn vị tính</th><th>Tỷ lệ</th><th>' + (isBase ? 'Giá tham khảo' : 'Giá bán') + '</th>' +
             '<th>Khối lượng</th><th style="width:80px;"></th>' +
             '</tr></thead><tbody>';
         configs.forEach(function (c) {
@@ -829,7 +831,7 @@
             html += '<tr>' +
                 '<td>' + unitDisplay + '<br><small class="text-muted">' + escHtml(c.convert_note || '') + '</small></td>' +
                 '<td class="fw-semibold text-primary">× ' + escHtml(formatRatio(parseFloat(c.convert_to_htsoft))) + '</td>' +
-                (isBase ? '' : '<td>' + priceCell + '</td>') +
+                '<td>' + priceCell + '</td>' +
                 '<td>' + weightCell + '</td>' +
                 '<td class="text-end text-nowrap">' +
                 defaultBtn +
@@ -1244,7 +1246,7 @@
                 '<td>' + escHtml(r.local_product_name || '') + '</td>' +
                 '<td>' + unitDisplay + '</td>' +
                 '<td><span class="badge bg-light text-dark">× ' + escHtml(formatRatio(parseFloat(r.convert_to_htsoft))) + '</span></td>' +
-                (isBase ? '' : '<td>' + priceCell + '</td>') +
+                '<td>' + priceCell + '</td>' +
                 '<td>' + weightCell + '</td>' +
                 '<td><div class="tgs-note-cell">' + escHtml(r.convert_note || '') + '</div></td>' +
                 '<td class="text-nowrap">' +
@@ -2278,14 +2280,41 @@
         if (btnSyncAll) btnSyncAll.addEventListener('click', runBaseSyncAll);
     }
 
-    /* Đồng bộ Bảng gốc → tất cả bảng giá (chạy theo lô SKU) */
+    /* Đồng bộ Bảng gốc → tất cả bảng giá — mở modal hỏi cách xử lý giá */
+    var _bsModal = null;
+    function getBsModal() {
+        if (!_bsModal) {
+            var m = document.getElementById('baseSyncModal');
+            if (m) _bsModal = new bootstrap.Modal(m, { backdrop: 'static' });
+        }
+        return _bsModal;
+    }
     function runBaseSyncAll() {
         if (state.mode !== 'base') return;
-        if (!confirm('Đồng bộ cấu trúc từ Bảng gốc xuống TẤT CẢ bảng giá?\n'
-            + 'ĐVT / tỉ lệ được cập nhật theo Bảng gốc; giá của từng bảng giá KHÔNG bị đụng.')) return;
-
-        var btn = el('btnBaseSyncAll');
-        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang đồng bộ…'; }
+        var m = getBsModal();
+        if (!m) return;
+        // reset modal
+        el('bsIntro').classList.remove('d-none');
+        el('bsProgressWrap').classList.add('d-none');
+        el('bsResult').classList.add('d-none');
+        el('bsPriceNone').checked = true;
+        el('bsStart').disabled = false;
+        el('bsStart').classList.remove('d-none');
+        el('bsProgressBar').style.width = '0%';
+        el('bsStart').onclick = function () { startBaseSync(); };
+        m.show();
+    }
+    function startBaseSync() {
+        var priceMode = (document.querySelector('input[name="bsPriceMode"]:checked') || {}).value || 'none';
+        if (priceMode === 'overwrite'
+            && !confirm('GHI ĐÈ TOÀN BỘ giá của mọi bảng giá bằng giá tham khảo?\nKhông thể hoàn tác.')) {
+            return;
+        }
+        el('bsIntro').classList.add('d-none');
+        el('bsStart').classList.add('d-none');
+        el('bsCancel').disabled = true;
+        el('bsCloseX').disabled = true;
+        el('bsProgressWrap').classList.remove('d-none');
 
         postAjax('tgs_htsoft_base_sync_prepare', {}).then(function (res) {
             if (!res.success) throw new Error();
@@ -2294,25 +2323,40 @@
             var done  = 0;
 
             function step(offset) {
-                postAjax('tgs_htsoft_base_sync_batch', { offset: offset, batch_size: size }).then(function (r) {
+                postAjax('tgs_htsoft_base_sync_batch', {
+                    offset: offset, batch_size: size, sync_prices: priceMode,
+                }).then(function (r) {
                     if (!r.success) throw new Error();
                     done += parseInt(r.data.processed, 10) || 0;
-                    if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>'
-                        + 'Đồng bộ ' + done.toLocaleString('vi-VN') + '/' + total.toLocaleString('vi-VN');
-                    if (r.data.done) {
-                        toast('Đã đồng bộ Bảng gốc xuống mọi bảng giá (' + done.toLocaleString('vi-VN') + ' mã).', 'success');
-                        resetSyncBtn();
-                    } else {
-                        step(parseInt(r.data.next_offset, 10) || (offset + size));
-                    }
-                }).catch(function () { toast('Lỗi khi đồng bộ.', 'error'); resetSyncBtn(); });
+                    var pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 100;
+                    el('bsProgressBar').style.width = pct + '%';
+                    el('bsProgressPct').textContent = pct + '%';
+                    el('bsProgressCount').textContent = done.toLocaleString('vi-VN') + ' / ' + total.toLocaleString('vi-VN') + ' mã hàng';
+                    if (r.data.done) { finishBaseSync(done, priceMode); }
+                    else { step(parseInt(r.data.next_offset, 10) || (offset + size)); }
+                }).catch(function () { failBaseSync(); });
             }
             step(0);
-        }).catch(function () { toast('Lỗi khi đồng bộ.', 'error'); resetSyncBtn(); });
-
-        function resetSyncBtn() {
-            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bx bx-sync me-1"></i>Đồng bộ Bảng gốc → tất cả bảng giá'; }
-        }
+        }).catch(function () { failBaseSync(); });
+    }
+    function finishBaseSync(done, priceMode) {
+        el('bsProgressBar').classList.remove('progress-bar-animated');
+        el('bsProgressText').textContent = 'Hoàn tất.';
+        var pnote = priceMode === 'overwrite' ? ' (đã ghi đè giá)'
+                  : priceMode === 'fill' ? ' (đã điền giá cho ĐVT trống)' : '';
+        var res = el('bsResult');
+        res.classList.remove('d-none');
+        res.innerHTML = '<i class="bx bx-check-circle me-1"></i>Đã đồng bộ ' + done.toLocaleString('vi-VN') + ' mã hàng xuống mọi bảng giá' + pnote + '.';
+        el('bsCancel').disabled = false;
+        el('bsCloseX').disabled = false;
+        el('bsCancel').textContent = 'Đóng';
+        markMappingsStale();
+    }
+    function failBaseSync() {
+        toast('Lỗi khi đồng bộ. Thử lại.', 'error');
+        el('bsCancel').disabled = false;
+        el('bsCloseX').disabled = false;
+        el('bsProgressText').textContent = 'Lỗi.';
     }
 
     /* =========================================================================

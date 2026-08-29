@@ -16,7 +16,12 @@ nút "Import Excel cấu trúc" riêng → trùng lặp, dễ sai.
 Từ 01/09/2026:
 
 - **Bảng gốc (Base)** = nguồn khai CẤU TRÚC duy nhất: SKU ↔ ĐVT ↔ tỉ lệ quy đổi ↔
-  ĐVT bán chính ↔ khối lượng ↔ ghi chú gốc. **KHÔNG có giá.**
+  ĐVT bán chính ↔ khối lượng ↔ ghi chú gốc + **giá tham khảo** (`unit_price`).
+  Giá tham khảo KHÔNG dùng trực tiếp cho POS — POS đọc `unit_price` của
+  `wp_global_htsoft_stock_convert` theo `price_list_id`. Nó chỉ để:
+  (a) "Thống nhất ĐVT bán chính" chạy đúng công thức gốc (tỉ lệ > 1 gần nhất
+  **VÀ có giá**…); (b) nút "Đồng bộ Base → tất cả bảng giá" có tuỳ chọn đổ giá
+  tham khảo xuống bảng giá.
 - **Bảng giá** bám theo Base. KHÔNG thêm/xóa ĐVT, KHÔNG sửa tỉ lệ. Chỉ khai:
   - `unit_price` — giá theo ĐVT, **riêng từng bảng giá** (được phép khác nhau).
   - `convert_note` — sửa ghi chú nếu cần (⇒ `note_overridden = 1`).
@@ -59,7 +64,7 @@ Hàm lõi: `TGS_HTSoft_Stock_Converter::propagate_base_to_price_lists($skus = nu
 | Cột | Khi INSERT (dòng mới) | Khi UPDATE (dòng đã có) |
 |---|---|---|
 | `convert_to_htsoft`, `convert_from_tgs`, `unit_weight_kg` | theo Base | **luôn** theo Base |
-| `unit_price` | `NULL` | **giữ nguyên** (không nằm trong danh sách UPDATE) |
+| `unit_price` | `sync_prices` = none → `NULL`; fill/overwrite → giá tham khảo của Base | none → giữ nguyên; fill → điền nếu đang NULL; overwrite → ghi đè bằng giá tham khảo |
 | `convert_note` | theo Base | `IF(note_overridden = 1, giữ, theo Base)` |
 | `is_default_unit` | theo Base | `IF(default_unit_overridden = 1, giữ, theo Base)` |
 | `is_deleted` | 0 | 0 (hồi sinh dòng đã xóa nếu Base khai lại) |
@@ -81,7 +86,7 @@ xóa mềm dòng tương ứng ở MỌI bảng giá; bảng giá nào vừa m�
 | Đặt ĐVT bán chính (`ajax_base_set_default_unit`) | `propagate_base_to_price_lists([$sku])` |
 | Import Excel cấu trúc (`ajax_base_import_excel_rows`) | mỗi lô → propagate các SKU trong lô |
 | Thống nhất ĐVT bán chính (`ajax_base_default_scan_batch`) | mỗi lô → propagate |
-| Nút "Đồng bộ Base → tất cả bảng giá" (`ajax_base_sync_batch`) | chạy lại toàn bộ theo lô SKU |
+| Nút "Đồng bộ Base → tất cả bảng giá" (`ajax_base_sync_batch`) | chạy lại toàn bộ theo lô SKU; tham số `sync_prices`: `none` / `fill` (điền ĐVT trống giá) / `overwrite` (ghi đè) |
 | Tạo bảng giá mới (`ajax_save_price_list`) | `populate_price_list_from_base($new_id)` |
 
 ---
