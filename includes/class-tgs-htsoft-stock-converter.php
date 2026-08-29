@@ -3000,12 +3000,14 @@ class TGS_HTSoft_Stock_Converter
         $conv = self::table_mapping();
         $now  = current_time('mysql');
 
+        // global_product_sku là utf8mb4_bin ở cả 2 vế → '=' đã là so khớp nhị
+        // phân + DÙNG ĐƯỢC index uk_list_sku_unit. Thêm BINARY chỉ làm mất index.
         $wpdb->query($wpdb->prepare(
             "UPDATE {$conv} d
              JOIN {$conv} s
                ON s.price_list_id = %d
+              AND s.global_product_sku = d.global_product_sku
               AND s.convert_unit = d.convert_unit
-              AND BINARY s.global_product_sku = d.global_product_sku
              SET d.unit_price              = s.unit_price,
                  d.convert_note            = s.convert_note,
                  d.note_overridden         = s.note_overridden,

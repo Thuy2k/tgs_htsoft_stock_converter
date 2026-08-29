@@ -446,7 +446,12 @@
 
         var id = parseInt(plDom.formId.value, 10) || 0;
 
+        var saveHtml = plDom.formSave.innerHTML;
         plDom.formSave.disabled = true;
+        if (id === 0) {
+            plDom.formSave.innerHTML =
+                '<span class="spinner-border spinner-border-sm me-1"></span>Đang tạo (đổ cấu trúc từ Bảng gốc)…';
+        }
         postAjax('tgs_htsoft_converter_save_price_list', {
             id:                id,
             price_list_name:   name,
@@ -471,7 +476,10 @@
                 }
             });
         }).catch(function () { toast('Loi ket noi.', 'error'); })
-          .finally(function () { plDom.formSave.disabled = false; });
+          .finally(function () {
+              plDom.formSave.disabled = false;
+              plDom.formSave.innerHTML = saveHtml;
+          });
     }
 
     function deletePriceList(id) {
