@@ -423,6 +423,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                         <table class="table table-hover table-sm mb-0" id="mappingTable">
                             <thead>
                                 <tr>
+                                    <th style="width:56px;" data-ds-filter="off">STT</th>
                                     <th>Mã hàng</th>
                                     <th>Tên sản phẩm</th>
                                     <th>ĐVT bán</th>
@@ -430,7 +431,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <th id="mappingPriceHead">Giá bán</th>
                                     <th>Khối lượng</th>
                                     <th>Ghi chú</th>
-                                    <th style="width:96px;">Thao tác</th>
+                                    <th style="width:96px;" data-ds-filter="off">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody id="mappingTableBody"></tbody>

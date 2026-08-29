@@ -1078,7 +1078,7 @@
         closeEditStrip();
         if (dom.mappingTableBody) {
             dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">'
+                '<tr><td colspan="9" class="text-center text-muted py-4">'
                 + '<span class="spinner-border spinner-border-sm me-2"></span>Đang tải toàn bộ danh sách…</td></tr>';
         }
         if (dom.mappingTableFooter) dom.mappingTableFooter.textContent = 'Đang tải…';
@@ -1086,7 +1086,7 @@
         postAjax('tgs_htsoft_converter_list_all', {}).then(function (res) {
             if (!res || !res.success) {
                 if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
-                    '<tr><td colspan="8" class="text-center text-danger py-4">'
+                    '<tr><td colspan="9" class="text-center text-danger py-4">'
                     + ((res && res.data && res.data.message) || 'Lỗi tải dữ liệu.') + '</td></tr>';
                 return;
             }
@@ -1095,7 +1095,7 @@
             renderGrid();
         }).catch(function () {
             if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-danger py-4">Lỗi kết nối.</td></tr>';
+                '<tr><td colspan="9" class="text-center text-danger py-4">Lỗi kết nối.</td></tr>';
         }).finally(function () { state.mappingLoading = false; });
     }
 
@@ -1124,6 +1124,7 @@
             ? '<button class="btn btn-xs btn-outline-danger" data-g-del="' + r.global_htsoft_stock_convert_id + '" title="Xóa vĩnh viễn"><i class="bx bx-trash"></i></button>'
             : '';
         return '<tr data-i="' + i + '" data-id="' + r.global_htsoft_stock_convert_id + '" class="tgs-grid-row" style="cursor:pointer">' +
+            '<td class="text-end text-muted">' + (i + 1) + '</td>' +
             '<td><code class="text-primary">' + escHtml(r.global_product_sku || '') + '</code></td>' +
             '<td class="text-truncate" style="max-width:280px">' + escHtml(r.local_product_name || '') + '</td>' +
             '<td>' + unitCell + ovBadge + '</td>' +
@@ -1139,13 +1140,14 @@
 
     function gridCellText(r, col) {
         switch (col) {
-            case 0: return String(r.global_product_sku || '');
-            case 1: return String(r.local_product_name || '');
-            case 2: return String(r.convert_unit || '');
-            case 3: return formatRatio(parseFloat(r.convert_to_htsoft));
-            case 4: { var p = numOrNull(r.unit_price); return p === null ? '' : formatPrice(p); }
-            case 5: { var w = numOrNull(r.unit_weight_kg); return w === null ? '' : formatWeight(w); }
-            case 6: return String(r.convert_note || '');
+            case 0: return '';                                       // STT — không lọc / xuất
+            case 1: return String(r.global_product_sku || '');
+            case 2: return String(r.local_product_name || '');
+            case 3: return String(r.convert_unit || '');
+            case 4: return formatRatio(parseFloat(r.convert_to_htsoft));
+            case 5: { var p = numOrNull(r.unit_price); return p === null ? '' : formatPrice(p); }
+            case 6: { var w = numOrNull(r.unit_weight_kg); return w === null ? '' : formatWeight(w); }
+            case 7: return String(r.convert_note || '');
             default: return '';
         }
     }
@@ -1175,7 +1177,7 @@
 
         if (!state.allRows.length) {
             if (dom.mappingTableBody) dom.mappingTableBody.innerHTML =
-                '<tr><td colspan="8" class="text-center text-muted py-4">Chưa có dòng nào</td></tr>';
+                '<tr><td colspan="9" class="text-center text-muted py-4">Chưa có dòng nào</td></tr>';
             return;
         }
 
