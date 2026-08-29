@@ -1150,10 +1150,21 @@
         }
     }
 
+    /* Khối cuộn của lưới phải có chiều cao THẬT (px) để virtualBody tính đúng
+       khung nhìn — dùng vh dễ bị co giãn theo nội dung trong iframe tab. */
+    function fitGridHeight() {
+        var sc = el('gridScroll');
+        if (!sc) return;
+        var top = sc.getBoundingClientRect().top;
+        sc.style.height = Math.max(320, Math.round(window.innerHeight - top - 20)) + 'px';
+    }
+
     function renderGrid() {
         var table = el('mappingTable');
         var rows  = gridVisibleRows();
         var ds    = window.TGSDesignSystem;
+
+        fitGridHeight();
 
         if (dom.mappingTableFooter) {
             dom.mappingTableFooter.textContent =
@@ -2236,6 +2247,9 @@
         }
 
         bindGridEvents();
+        window.addEventListener('resize', function () {
+            if (state.mappingLoaded) { fitGridHeight(); var t = el('mappingTable'); if (t && t.dsVirtual) t.dsVirtual.redraw(); }
+        });
 
         // Dải sửa nhanh 1 dòng
         var geSave = el('geSave'), geCancel = el('geCancel'), geDelete = el('geDelete');

@@ -419,7 +419,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 </div>
 
                 <div class="tgs-table-body">
-                    <div id="gridScroll" style="overflow:auto; max-height:60vh;">
+                    <div id="gridScroll" style="overflow:auto; position:relative; height:60vh;">
                         <table class="table table-hover table-sm mb-0" id="mappingTable">
                             <thead>
                                 <tr>
