@@ -523,3 +523,11 @@
 .tgs-table-panel {
     animation: fadeIn 0.3s ease;
 }
+
+/* ── Ẩn nút theo chế độ (Bảng gốc / Bảng giá) ──────────────────────────
+   Chốt bằng CSS + class trên #plDetailSection để không bị JS render lại
+   làm hiện lại nhầm. */
+#plDetailSection.tgs-mode-base .js-pricelist-only,
+#plDetailSection.tgs-mode-pricelist .js-base-only {
+    display: none !important;
+}

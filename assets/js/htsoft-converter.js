@@ -1050,13 +1050,7 @@
                     toast((res.data && res.data.message) || 'Da xoa.', 'success');
                     var sku = dom.cfgSku ? dom.cfgSku.value : '';
                     if (sku) loadConfigsForSku(sku);
-                    // Gỡ khỏi lưới đang giữ trong RAM
-                    if (state.allRows && state.allRows.length) {
-                        state.allRows = state.allRows.filter(function (x) {
-                            return parseInt(x.global_htsoft_stock_convert_id, 10) !== id;
-                        });
-                        renderGrid();
-                    }
+                    if (state.allRows && state.allRows.length) gridDropRow(id);
                 } else {
                     toast((res.data && res.data.message) || 'Loi xoa.', 'error');
                 }
@@ -1149,6 +1143,36 @@
             case 6: { var w = numOrNull(r.unit_weight_kg); return w === null ? '' : formatWeight(w); }
             case 7: return String(r.convert_note || '');
             default: return '';
+        }
+    }
+
+    /* Vẽ lại ĐÚNG khung nhìn hiện tại (không dựng lại, không nhảy cuộn, giữ
+       nguyên bộ lọc theo cột). Dùng sau khi sửa 1 dòng tại chỗ. */
+    function gridRedraw() {
+        var t = el('mappingTable');
+        if (t && t.dsVirtual) { fitGridHeight(); t.dsVirtual.redraw(); }
+        else renderGrid();
+    }
+
+    /* Gỡ 1 dòng khỏi lưới (sau khi xóa) — vá cả mảng gốc lẫn khung nhìn ảo,
+       không nhảy cuộn. */
+    function gridDropRow(id) {
+        id = parseInt(id, 10);
+        state.allRows = state.allRows.filter(function (x) {
+            return parseInt(x.global_htsoft_stock_convert_id, 10) !== id;
+        });
+        var t = el('mappingTable');
+        if (t && t.dsVirtual && typeof t.dsVirtual.getRows === 'function') {
+            var v = t.dsVirtual.getRows();
+            for (var k = 0; k < v.length; k++) {
+                if (parseInt(v[k].global_htsoft_stock_convert_id, 10) === id) { v.splice(k, 1); break; }
+            }
+            t.dsVirtual.redraw();
+        } else {
+            renderGrid();
+        }
+        if (dom.mappingTableFooter) {
+            dom.mappingTableFooter.textContent = state.allRows.length.toLocaleString('vi-VN') + ' dòng';
         }
     }
 
@@ -1296,7 +1320,7 @@
                 });
             }
             closeEditStrip();
-            renderGrid();
+            gridRedraw();   // vẽ lại tại chỗ — không nhảy cuộn, giữ bộ lọc cột
             // Bảng giá: vừa khai tay 1 giá → hỏi điền các ĐVT còn trống
             if (!isBase && d.saved_unit_price && parseFloat(d.saved_unit_price) > 0
                 && Array.isArray(d.missing_price_units) && d.missing_price_units.length) {
@@ -1322,11 +1346,8 @@
                 return;
             }
             toast((res.data && res.data.message) || 'Đã xóa.', 'success');
-            state.allRows = state.allRows.filter(function (x) {
-                return parseInt(x.global_htsoft_stock_convert_id, 10) !== id;
-            });
             closeEditStrip();
-            renderGrid();
+            gridDropRow(id);
             if (dom.cfgSku && dom.cfgSku.value === row.global_product_sku) loadConfigsForSku(row.global_product_sku);
         }).catch(function () { toast('Loi ket noi.', 'error'); });
     }

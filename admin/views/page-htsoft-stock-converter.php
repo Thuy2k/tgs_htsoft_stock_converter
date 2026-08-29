@@ -112,7 +112,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                             </div>
                         </div>
                     </div>
-                    <div class="d-flex align-items-center flex-wrap gap-2" id="plDetailActions">
+                    <div class="d-flex align-items-center flex-wrap gap-2 js-pricelist-only" id="plDetailActions">
                         <span class="badge bg-light text-dark" id="plCurrentBlogs">Chưa áp website nào</span>
                         <button type="button" class="btn btn-sm btn-info" id="btnApplyBlogs">
                             <i class="bx bx-globe me-1"></i>Áp dụng cho website
@@ -309,24 +309,24 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                                     <i class="bx bx-refresh"></i>
                                 </button>
                             </div>
-                            <button class="btn btn-sm btn-success" type="button" id="btnImportExcel">
+                            <button class="btn btn-sm btn-success js-base-only" type="button" id="btnImportExcel">
                                 <i class="bx bx-import me-1"></i>Import Excel (cấu trúc)
                             </button>
                             <input type="file" id="excelImportFile" accept=".xlsx,.xls" class="d-none">
                             <button class="btn btn-sm btn-primary" type="button" id="btnExportExcel">
                                 <i class="bx bx-export me-1"></i>Xuất Excel
                             </button>
-                            <button class="btn btn-sm btn-warning" type="button" id="btnImportPriceExcel">
+                            <button class="btn btn-sm btn-warning js-pricelist-only" type="button" id="btnImportPriceExcel">
                                 <i class="bx bx-dollar me-1"></i>Import Giá
                             </button>
                             <input type="file" id="priceImportFile" accept=".xlsx,.xls" class="d-none">
-                            <button class="btn btn-sm btn-dark" type="button" id="btnUnifyDefaultUnit">
+                            <button class="btn btn-sm btn-dark js-base-only" type="button" id="btnUnifyDefaultUnit">
                                 <i class="bx bx-check-double me-1"></i>Thống nhất ĐVT bán chính
                             </button>
-                            <button class="btn btn-sm btn-outline-dark" type="button" id="btnResetDefaultToBase">
+                            <button class="btn btn-sm btn-outline-dark js-pricelist-only" type="button" id="btnResetDefaultToBase">
                                 <i class="bx bx-revision me-1"></i>ĐVT chính theo Bảng gốc
                             </button>
-                            <button class="btn btn-sm btn-primary" type="button" id="btnBaseSyncAll">
+                            <button class="btn btn-sm btn-primary js-base-only" type="button" id="btnBaseSyncAll">
                                 <i class="bx bx-sync me-1"></i>Đồng bộ Bảng gốc → tất cả bảng giá
                             </button>
                         </div>
