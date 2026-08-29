@@ -2348,31 +2348,56 @@
         }
         return _bsModal;
     }
+    var _bsRunning = false;
+    var _bsStop    = false;
+    function bsShowIntro(show) {
+        el('bsIntro').classList.toggle('d-none', !show);
+        el('bsStart').classList.toggle('d-none', !show);
+        el('bsStart').disabled = !show;
+    }
     function runBaseSyncAll() {
         if (state.mode !== 'base') return;
         var m = getBsModal();
         if (!m) return;
-        // reset modal
-        el('bsIntro').classList.remove('d-none');
+        if (_bsRunning) { m.show(); return; }   // đang chạy → chỉ mở lại modal, KHÔNG reset
+        _bsStop = false;
+        bsShowIntro(true);
         el('bsProgressWrap').classList.add('d-none');
         el('bsResult').classList.add('d-none');
         el('bsPriceNone').checked = true;
-        el('bsStart').disabled = false;
-        el('bsStart').classList.remove('d-none');
         el('bsProgressBar').style.width = '0%';
-        el('bsStart').onclick = function () { startBaseSync(); };
+        el('bsProgressBar').classList.add('progress-bar-animated');
+        el('bsCancel').disabled = false;
+        el('bsCloseX').disabled = false;
+        el('bsCancel').textContent = 'Hủy';
+        el('bsStart').onclick = startBaseSync;
+        el('bsCancel').onclick = function () {
+            if (_bsRunning) {
+                _bsStop = true;
+                el('bsCancel').disabled = true;
+                el('bsCancel').textContent = 'Đang dừng…';
+            } else {
+                getBsModal().hide();
+            }
+        };
+        el('bsCloseX').onclick = function () { if (!_bsRunning) getBsModal().hide(); };
         m.show();
     }
     function startBaseSync() {
+        if (_bsRunning) return;
         var priceMode = (document.querySelector('input[name="bsPriceMode"]:checked') || {}).value || 'none';
         if (priceMode === 'overwrite'
             && !confirm('GHI ĐÈ TOÀN BỘ giá của mọi bảng giá bằng giá tham khảo?\nKhông thể hoàn tác.')) {
             return;
         }
-        el('bsIntro').classList.add('d-none');
-        el('bsStart').classList.add('d-none');
-        el('bsCancel').disabled = true;
+        _bsRunning = true;
+        _bsStop    = false;
+        bsShowIntro(false);
+        el('bsCancel').disabled = false;         // giờ là nút DỪNG
+        el('bsCancel').textContent = 'Dừng';
         el('bsCloseX').disabled = true;
+        var toolBtn = el('btnBaseSyncAll');
+        if (toolBtn) toolBtn.disabled = true;
         el('bsProgressWrap').classList.remove('d-none');
 
         postAjax('tgs_htsoft_base_sync_prepare', {}).then(function (res) {
@@ -2382,6 +2407,7 @@
             var done  = 0;
 
             function step(offset) {
+                if (_bsStop) { finishBaseSync(done, priceMode, true); return; }
                 postAjax('tgs_htsoft_base_sync_batch', {
                     offset: offset, batch_size: size, sync_prices: priceMode,
                 }).then(function (r) {
@@ -2391,31 +2417,38 @@
                     el('bsProgressBar').style.width = pct + '%';
                     el('bsProgressPct').textContent = pct + '%';
                     el('bsProgressCount').textContent = done.toLocaleString('vi-VN') + ' / ' + total.toLocaleString('vi-VN') + ' mã hàng';
-                    if (r.data.done) { finishBaseSync(done, priceMode); }
+                    if (r.data.done) { finishBaseSync(done, priceMode, false); }
                     else { step(parseInt(r.data.next_offset, 10) || (offset + size)); }
                 }).catch(function () { failBaseSync(); });
             }
             step(0);
         }).catch(function () { failBaseSync(); });
     }
-    function finishBaseSync(done, priceMode) {
+    function bsEnd() {
+        _bsRunning = false;
+        var toolBtn = el('btnBaseSyncAll');
+        if (toolBtn) toolBtn.disabled = false;
+        el('bsCancel').disabled = false;
+        el('bsCloseX').disabled = false;
+        el('bsCancel').textContent = 'Đóng';
+    }
+    function finishBaseSync(done, priceMode, stopped) {
         el('bsProgressBar').classList.remove('progress-bar-animated');
-        el('bsProgressText').textContent = 'Hoàn tất.';
+        el('bsProgressText').textContent = stopped ? 'Đã dừng.' : 'Hoàn tất.';
         var pnote = priceMode === 'overwrite' ? ' (đã ghi đè giá)'
                   : priceMode === 'fill' ? ' (đã điền giá cho ĐVT trống)' : '';
         var res = el('bsResult');
         res.classList.remove('d-none');
-        res.innerHTML = '<i class="bx bx-check-circle me-1"></i>Đã đồng bộ ' + done.toLocaleString('vi-VN') + ' mã hàng xuống mọi bảng giá' + pnote + '.';
-        el('bsCancel').disabled = false;
-        el('bsCloseX').disabled = false;
-        el('bsCancel').textContent = 'Đóng';
+        res.innerHTML = '<i class="bx bx-check-circle me-1"></i>'
+            + (stopped ? 'Đã dừng sau ' : 'Đã đồng bộ ')
+            + done.toLocaleString('vi-VN') + ' mã hàng xuống mọi bảng giá' + pnote + '.';
+        bsEnd();
         markMappingsStale();
     }
     function failBaseSync() {
         toast('Lỗi khi đồng bộ. Thử lại.', 'error');
-        el('bsCancel').disabled = false;
-        el('bsCloseX').disabled = false;
         el('bsProgressText').textContent = 'Lỗi.';
+        bsEnd();
     }
 
     /* =========================================================================

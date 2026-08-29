@@ -963,7 +963,7 @@ $scanner_js_url = defined('TGS_SHOP_PLUGIN_URL') ? TGS_SHOP_PLUGIN_URL . 'assets
                 <div id="bsResult" class="alert alert-success py-2 mt-2 d-none"></div>
             </div>
             <div class="modal-footer py-2">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="bsCancel">Hủy</button>
+                <button type="button" class="btn btn-secondary" id="bsCancel">Hủy</button>
                 <button type="button" class="btn btn-primary" id="bsStart">
                     <i class="bx bx-play me-1"></i>Bắt đầu đồng bộ
                 </button>
